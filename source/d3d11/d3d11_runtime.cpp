@@ -1017,32 +1017,6 @@ namespace reshade::d3d11
 			return;
 		}
 
-		static int cooldown = 0, traffic = 0;
-
-		if (cooldown-- > 0)
-		{
-			traffic += g_network_traffic > 0;
-
-			if (!_depth_buffer_before_clear)
-			{
-				return;
-			}
-		}
-		else
-		{
-			cooldown = 30;
-			if (traffic > 10)
-			{
-				traffic = 0;
-				create_depthstencil_replacement(nullptr, nullptr);
-				return;
-			}
-			else
-			{
-				traffic = 0;
-			}
-		}
-
 		if (_is_multisampling_enabled)
 		{
 			return;

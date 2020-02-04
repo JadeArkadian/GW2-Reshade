@@ -210,6 +210,7 @@ UINT STDMETHODCALLTYPE Direct3DDevice9::GetNumberOfSwapChains()
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters)
 {
+
 	LOG(INFO) << "Redirecting '" << "IDirect3DDevice9::Reset" << "(" << this << ", " << pPresentationParameters << ")' ...";
 
 	if (pPresentationParameters == nullptr)
@@ -223,6 +224,17 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::Reset(D3DPRESENT_PARAMETERS *pPresent
 	assert(_implicit_swapchain->_runtime != nullptr);
 
 	const auto runtime = _implicit_swapchain->_runtime;
+
+	D3DPRESENT_PARAMETERS _pParam;
+	_implicit_swapchain->GetPresentParameters(&_pParam);
+
+	if (_reset_fail_guard) {
+		_reset_fail_guard = false;
+		LOG(INFO) << "> Force reset.";
+	} else if (!_reset_fail_guard && _pParam.BackBufferHeight == pPresentationParameters->BackBufferHeight && _pParam.BackBufferWidth == pPresentationParameters->BackBufferWidth) {
+		LOG(INFO) << "> Same buffer size, skip reset.";
+		return D3D_OK;
+	}
 
 	runtime->on_reset();
 
@@ -258,9 +270,15 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::Present(const RECT *pSourceRect, cons
 	assert(_implicit_swapchain != nullptr);
 	assert(_implicit_swapchain->_runtime != nullptr);
 
+	_redirect->OnPresent();
 	_implicit_swapchain->_runtime->on_present();
 
-	return _orig->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+	HRESULT hr = _orig->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+
+	if (FAILED(hr)) {
+		_reset_fail_guard = true;
+	}
+	return hr;
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetBackBuffer(UINT iSwapChain, UINT iBackBuffer, D3DBACKBUFFER_TYPE Type, IDirect3DSurface9 **ppBackBuffer)
 {
@@ -391,7 +409,7 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::CreateOffscreenPlainSurface(UINT Widt
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::SetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9 *pRenderTarget)
 {
-	return _orig->SetRenderTarget(RenderTargetIndex, pRenderTarget);
+	return _redirect->SetRenderTarget(RenderTargetIndex, pRenderTarget);
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetRenderTarget(DWORD RenderTargetIndex, IDirect3DSurface9 **ppRenderTarget)
 {
@@ -691,11 +709,11 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetFVF(DWORD *pFVF)
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::CreateVertexShader(const DWORD *pFunction, IDirect3DVertexShader9 **ppShader)
 {
-	return _orig->CreateVertexShader(pFunction, ppShader);
+	return _redirect->CreateVertexShader(pFunction, ppShader);
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::SetVertexShader(IDirect3DVertexShader9 *pShader)
 {
-	return _orig->SetVertexShader(pShader);
+	return _redirect->SetVertexShader(pShader);
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetVertexShader(IDirect3DVertexShader9 **ppShader)
 {
@@ -751,11 +769,11 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetIndices(IDirect3DIndexBuffer9 **pp
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::CreatePixelShader(const DWORD *pFunction, IDirect3DPixelShader9 **ppShader)
 {
-	return _orig->CreatePixelShader(pFunction, ppShader);
+	return _redirect->CreatePixelShader(pFunction, ppShader);
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::SetPixelShader(IDirect3DPixelShader9 *pShader)
 {
-	return _orig->SetPixelShader(pShader);
+	return _redirect->SetPixelShader(pShader);
 }
 HRESULT STDMETHODCALLTYPE Direct3DDevice9::GetPixelShader(IDirect3DPixelShader9 **ppShader)
 {

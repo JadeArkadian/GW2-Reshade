@@ -872,29 +872,6 @@ namespace reshade::opengl
 
 	void opengl_runtime::detect_depth_source()
 	{
-		static int cooldown = 0, traffic = 0;
-
-		if (cooldown-- > 0)
-		{
-			traffic += g_network_traffic > 0;
-			return;
-		}
-		else
-		{
-			cooldown = 30;
-
-			if (traffic > 10)
-			{
-				traffic = 0;
-				_depth_source = 0;
-				create_depth_texture(0, 0, GL_NONE);
-				return;
-			}
-			else
-			{
-				traffic = 0;
-			}
-		}
 
 		GLuint best_match = 0;
 		depth_source_info best_info = { 0, 0, 0, GL_NONE };

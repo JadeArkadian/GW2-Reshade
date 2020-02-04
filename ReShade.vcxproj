@@ -29,7 +29,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{0401ADF5-D085-4A3D-95B2-D9B7896BB338}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
@@ -231,6 +231,9 @@
       <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/std:c++latest %(AdditionalOptions)</AdditionalOptions>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <LanguageStandard>
+      </LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -250,6 +253,10 @@
     <PreBuildEvent>
       <Command>tools\verbuild res\version.h *.*.*.+ -xFP -b0.0.0.0 -s</Command>
     </PreBuildEvent>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ProjectReference Include="deps\gl3w.vcxproj">
@@ -291,6 +298,8 @@
     <ClCompile Include="source\dxgi\dxgi_device.cpp" />
     <ClCompile Include="source\dxgi\dxgi_swapchain.cpp" />
     <ClCompile Include="source\filesystem.cpp" />
+    <ClCompile Include="source\gw2\gw2_table.cpp" />
+    <ClCompile Include="source\gw2\hook_gw2.cpp" />
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hook_manager.cpp" />
     <ClCompile Include="source\ini_file.cpp" />
@@ -307,7 +316,7 @@
     <ClCompile Include="source\runtime_objects.cpp" />
     <ClCompile Include="source\update_check.cpp" />
     <ClCompile Include="source\windows\user32.cpp" />
-    <ClCompile Include="source\windows\ws2_32.cpp" />
+    <ClCompile Include="source\xxhash.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="res\resource.h" />
@@ -335,6 +344,8 @@
     <ClInclude Include="source\dxgi\dxgi_device.hpp" />
     <ClInclude Include="source\dxgi\dxgi_swapchain.hpp" />
     <ClInclude Include="source\filesystem.hpp" />
+    <ClInclude Include="source\gw2\gw2_table.hpp" />
+    <ClInclude Include="source\gw2\hook_gw2.hpp" />
     <ClInclude Include="source\hook.hpp" />
     <ClInclude Include="source\hook_manager.hpp" />
     <ClInclude Include="source\ini_file.hpp" />
@@ -350,6 +361,7 @@
     <ClInclude Include="source\runtime.hpp" />
     <ClInclude Include="source\runtime_objects.hpp" />
     <ClInclude Include="source\variant.hpp" />
+    <ClInclude Include="source\xxhash.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="res\resource.rc" />

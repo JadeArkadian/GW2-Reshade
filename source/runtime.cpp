@@ -18,39 +18,37 @@
 #include <stb_image_resize.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include "gw2\gw2_table.hpp"
 
 namespace reshade
 {
-	filesystem::path runtime::s_reshade_dll_path, runtime::s_target_executable_path;
+	filesystem::path runtime::s_reshade_dll_path, runtime::s_target_executable_path, runtime::s_gw2hook_wrkdir_path;
 
 	runtime::runtime(uint32_t renderer) :
 		_renderer_id(renderer),
 		_start_time(std::chrono::high_resolution_clock::now()),
 		_last_frame_duration(std::chrono::milliseconds(1)),
 		_imgui_context(ImGui::CreateContext()),
-		_effect_search_paths({ s_reshade_dll_path.parent_path() }),
-		_texture_search_paths({ s_reshade_dll_path.parent_path() }),
+		_effect_search_paths({ s_gw2hook_wrkdir_path + "Shaders\\" }),
+		_texture_search_paths({ s_gw2hook_wrkdir_path + "Textures\\" }),
 		_preprocessor_definitions({
 			"RESHADE_DEPTH_LINEARIZATION_FAR_PLANE=1000.0",
 			"RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0",
-			"RESHADE_DEPTH_INPUT_IS_REVERSED=1",
+			"RESHADE_DEPTH_INPUT_IS_REVERSED=0",
 			"RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0" }),
 		_menu_key_data(),
 		_screenshot_key_data(),
 		_effects_key_data(),
-		_screenshot_path(s_target_executable_path.parent_path()),
+		_screenshot_path(s_gw2hook_wrkdir_path + "Screenshots"),
 		_variable_editor_height(300)
 	{
 		_menu_key_data[0] = 0x71; // VK_F2
 		_menu_key_data[2] = true; // VK_SHIFT
 		_screenshot_key_data[0] = 0x2C; // VK_SNAPSHOT
 
-		_configuration_path = s_reshade_dll_path;
-		_configuration_path.replace_extension(".ini");
-		if (!filesystem::exists(_configuration_path))
-			_configuration_path = s_reshade_dll_path.parent_path() / "ReShade.ini";
-
-		_needs_update = check_for_update(_latest_version);
+		_configuration_path = filesystem::path(s_gw2hook_wrkdir_path + "config.ini");
+		/*if (!filesystem::exists(s_gw2hook_wrkdir_path))
+			_configuration_path = s_reshade_dll_path.parent_path() / "config.ini";*/
 
 		auto &imgui_io = _imgui_context->IO;
 		auto &imgui_style = _imgui_context->Style;
@@ -164,7 +162,6 @@ namespace reshade
 		_date[3] = tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec;
 
 		// Advance various statistics
-		g_network_traffic = 0;
 		_framecount++;
 		_last_frame_duration = std::chrono::high_resolution_clock::now() - _last_present_time;
 		_last_present_time += _last_frame_duration;
@@ -554,7 +551,7 @@ namespace reshade
 			pp.add_include_path(include_path);
 		}
 
-		pp.add_macro_definition("__RESHADE__", std::to_string(VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + VERSION_REVISION));
+		pp.add_macro_definition("__RESHADE__", std::to_string(RS_VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + VERSION_REVISION));
 		pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", _performance_mode ? "1" : "0");
 		pp.add_macro_definition("__VENDOR__", std::to_string(_vendor_id));
 		pp.add_macro_definition("__DEVICE__", std::to_string(_device_id));
@@ -781,6 +778,16 @@ namespace reshade
 		config.get("GENERAL", "NoReloadOnInit", _no_reload_on_init);
 		config.get("GENERAL", "SaveWindowState", _save_imgui_window_state);
 
+		config.get("GENERAL", "FogAmount", _fog_amount);
+		config.get("GENERAL", "NoBloom", _no_bloom);
+		config.get("GENERAL", "InjPS", _inj_ps);
+		config.get("GENERAL", "InjVS", _inj_vs);
+		config.get("GENERAL", "SkipUI", _skip_ui);
+		config.get("GENERAL", "AutoPreset", _auto_preset);
+
+		snprintf(_c_inj_ps, 32, "%#llx", _inj_ps);
+		snprintf(_c_inj_vs, 32, "%#llx", _inj_vs);
+
 		_imgui_context->IO.IniFilename = _save_imgui_window_state ? "ReShadeGUI.ini" : nullptr;
 
 		config.get("BUFFER_DETECTION", "DepthBufferRetrievalMode", _depth_buffer_before_clear);
@@ -836,7 +843,7 @@ namespace reshade
 			_current_preset = -1;
 		}
 
-		const filesystem::path parent_path = s_reshade_dll_path.parent_path();
+		const filesystem::path parent_path = s_gw2hook_wrkdir_path + "Presets";
 		auto preset_files2 = filesystem::list_files(parent_path, "*.ini");
 		auto preset_files3 = filesystem::list_files(parent_path, "*.txt");
 		preset_files2.insert(preset_files2.end(), std::make_move_iterator(preset_files3.begin()), std::make_move_iterator(preset_files3.end()));
@@ -887,6 +894,13 @@ namespace reshade
 		config.set("GENERAL", "NoReloadOnInit", _no_reload_on_init);
 		config.set("GENERAL", "SaveWindowState", _save_imgui_window_state);
 
+		config.set("GENERAL", "FogAmount", _fog_amount);
+		config.set("GENERAL", "NoBloom", _no_bloom);
+		config.set("GENERAL", "SkipUI", _skip_ui);
+		config.set("GENERAL", "InjPS", _inj_ps);
+		config.set("GENERAL", "InjVS", _inj_vs);
+		config.set("GENERAL", "AutoPreset", _auto_preset);
+
 		config.set("BUFFER_DETECTION", "DepthBufferRetrievalMode", _depth_buffer_before_clear);
 		config.set("BUFFER_DETECTION", "DepthBufferTextureFormat", _depth_buffer_texture_format);
 
@@ -901,7 +915,15 @@ namespace reshade
 	void runtime::load_preset(const filesystem::path &path)
 	{
 		ini_file preset(path);
-
+		
+		std::string zone = "";
+		//preset.get("", "Zone", preset_zone);
+		memset(_preset_zone, '\0', sizeof _preset_zone);
+		preset.get("", "Zone", zone);
+		//preset_zone.as<std::string>().copy(_preset_zone, 63, 0);
+		 for (int i = 0; i < zone.size(); i++)
+			 _preset_zone[i] = zone[i];
+			 
 		for (auto &variable : _uniforms)
 		{
 			int values_int[16] = {};
@@ -962,6 +984,8 @@ namespace reshade
 	void runtime::save_preset(const filesystem::path &path) const
 	{
 		ini_file preset(path);
+
+		preset.set("", "Zone", preset_zone);
 
 		std::unordered_set<std::string> active_effect_filenames;
 		for (const auto &technique : _techniques)
@@ -1125,8 +1149,8 @@ namespace reshade
 		// Create ImGui widgets and windows
 		if (show_splash)
 		{
-			ImGui::SetNextWindowPos(ImVec2(10, 10));
-			ImGui::SetNextWindowSize(ImVec2(_width - 20.0f, ImGui::GetFrameHeightWithSpacing() * 3), ImGuiCond_Appearing);
+			ImGui::SetNextWindowPos(ImVec2(0, 100));
+			ImGui::SetNextWindowSize(ImVec2(_width/3.0f - 20.0f, ImGui::GetFrameHeightWithSpacing() * 3), ImGuiCond_Appearing);
 			ImGui::Begin("Splash Screen", nullptr,
 				ImGuiWindowFlags_NoTitleBar |
 				ImGuiWindowFlags_NoScrollbar |
@@ -1136,26 +1160,15 @@ namespace reshade
 				ImGuiWindowFlags_NoInputs |
 				ImGuiWindowFlags_NoFocusOnAppearing);
 
-			ImGui::TextUnformatted("ReShade " VERSION_STRING_FILE " by crosire");
-
-			if (_needs_update)
-			{
-				ImGui::TextColored(ImVec4(1, 1, 0, 1),
-					"An update is available! Please visit https://reshade.me and install the new version (v%lu.%lu.%lu).",
-					_latest_version[0], _latest_version[1], _latest_version[2]);
-			}
-			else
-			{
-				ImGui::TextUnformatted("Visit https://reshade.me for news, updates, shaders and discussion.");
-			}
+			ImGui::TextUnformatted("ReShade by crosire (http://reshade.me)");
+			ImGui::TextUnformatted("Gw2 Hook " VERSION_STRING_FILE " by Grenbur (04348.github.io/Gw2Hook/)");
 
 			ImGui::Spacing();
 
 			if (_reload_remaining_effects != 0)
 			{
 				ImGui::Text(
-					"Loading (%u effects remaining) ... "
-					"This might take a while. The application could become unresponsive for some time.",
+					"Loading (%u effects remaining) ... ",
 					static_cast<unsigned int>(_reload_remaining_effects));
 			}
 			else
@@ -1228,7 +1241,7 @@ namespace reshade
 
 				ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 				ImGui::SetNextWindowSize(ImVec2(710, 650), ImGuiCond_FirstUseEver);
-				ImGui::Begin("ReShade " VERSION_STRING_FILE " by crosire###Main", &_show_menu,
+				ImGui::Begin("Gw2 Hook " VERSION_STRING_FILE "###Main", &_show_menu,
 					ImGuiWindowFlags_MenuBar |
 					ImGuiWindowFlags_NoCollapse);
 
@@ -1279,9 +1292,9 @@ namespace reshade
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImGui::GetStyle().ItemSpacing * 2);
 
-			const char *const menu_items[] = { "Home", "Settings", "Statistics", "About" };
+			const char *const menu_items[] = { "Home", "Gw2 Settings", "Settings", "Statistics", "About" };
 
-			for (int i = 0; i < 4; i++)
+			for (int i = 0; i < 5; i++)
 			{
 				if (ImGui::Selectable(menu_items[i], _menu_index == i, 0, ImVec2(ImGui::CalcTextSize(menu_items[i]).x, 0)))
 				{
@@ -1301,12 +1314,15 @@ namespace reshade
 			draw_overlay_menu_home();
 			break;
 		case 1:
-			draw_overlay_menu_settings();
+			draw_overlay_menu_gw2();
 			break;
 		case 2:
-			draw_overlay_menu_statistics();
+			draw_overlay_menu_settings();
 			break;
 		case 3:
+			draw_overlay_menu_statistics();
+			break;
+		case 4:
 			draw_overlay_menu_about();
 			break;
 		}
@@ -1352,6 +1368,7 @@ namespace reshade
 
 			ImGui::PushItemWidth(-(30 + ImGui::GetStyle().ItemSpacing.x) * 2 - 1);
 
+			//auto preset
 			if (ImGui::Combo("##presets", &_current_preset, get_preset_file, this, static_cast<int>(_preset_files.size())))
 			{
 				save_configuration();
@@ -1381,7 +1398,7 @@ namespace reshade
 
 				if (ImGui::InputText("Name", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
 				{
-					auto path = filesystem::absolute(buf, s_reshade_dll_path.parent_path());
+					auto path = filesystem::absolute(buf, s_gw2hook_wrkdir_path + "Presets");
 					path.replace_extension(".ini");
 
 					if (filesystem::exists(path) || filesystem::exists(path.parent_path()))
@@ -1453,6 +1470,18 @@ namespace reshade
 			ImGui::Separator();
 			ImGui::Spacing();
 
+			ImGui::Text("When using the auto preset selection, use this to limit this preset to a specific zone.");
+			ImGui::Text("More info about this field in the \"Gw2 Settings\" tab.");
+			if (ImGui::InputText("Zone", _preset_zone, sizeof(_preset_zone), ImGuiInputTextFlags_AutoSelectAll)) {
+				preset_zone = _preset_zone;
+				save_preset(_preset_files[_current_preset]);
+				
+			}
+			
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+			
 			ImGui::PushItemWidth(-130);
 
 			if (ImGui::InputText("##filter", _effect_filter_buffer, sizeof(_effect_filter_buffer), ImGuiInputTextFlags_AutoSelectAll))
@@ -1803,6 +1832,83 @@ namespace reshade
 
 		ImGui::PopID();
 	}
+	void runtime::draw_overlay_menu_gw2()
+	{
+		if (ImGui::CollapsingHeader("General", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			if (ImGui::Combo("Auto preset selection", &_auto_preset, "Yes\0No\0")) {
+				save_configuration();
+			}
+
+			
+			if (ImGui::DragFloat("Fog amount", &_fog_amount, 0.005f, 0.0f, 1.0f, "%.2f")) {
+				save_configuration();
+			}
+
+			if (ImGui::Combo("Skip UI", &_skip_ui, "Yes\0No\0")) {
+				save_configuration();
+			}
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			ImGui::Text("Following options need a restart to take effect.");
+			ImGui::Spacing();
+
+			if (ImGui::InputText("Injection PS", _c_inj_ps, sizeof(_c_inj_ps), ImGuiInputTextFlags_EnterReturnsTrue))
+			{
+				try {
+					_inj_ps = std::stoull(_c_inj_ps, nullptr, 16);
+				}
+				catch (...) {
+					_inj_ps = -1;
+				}
+				save_configuration();
+			}
+
+			if (ImGui::InputText("Injection VS", _c_inj_vs, sizeof(_c_inj_ps), ImGuiInputTextFlags_EnterReturnsTrue))
+			{
+				try {
+					_inj_vs = std::stoull(_c_inj_vs, nullptr, 16);
+				}
+				catch (...) {
+					_inj_vs = -1;
+				}
+				save_configuration();
+			}
+
+			if (ImGui::Combo("Allow Gw2 bloom", &_no_bloom, "Yes\0No\0")) {
+				save_configuration();
+			}
+
+			ImGui::Spacing();
+
+		}
+
+		if (ImGui::CollapsingHeader("Auto preset selection", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+
+			ImGui::Text("Usage of auto preset selection :\n");
+			ImGui::Spacing(); ImGui::Spacing(); ImGui::Spacing();
+			ImGui::Text("The Zone field in first tab is used to limit a preset to a specific zone.");
+			ImGui::Text("It will then be loaded automatically when switching map.");
+			ImGui::Spacing(); ImGui::Spacing();
+			ImGui::Text("This field can be :");
+			ImGui::Text("\t\tA map ID (\"15\", \"899\", etc...)");
+			ImGui::Text("\t\tA list of map ID (\"15-24-899\")");
+			ImGui::Text("\t\tA region (\"Ascalon\", \"World vs. World\", etc...)");
+			ImGui::Text("\t\t\"global\" (used as fallback)");
+			ImGui::Text("You should have a global preset to handle unspecified maps.");
+			ImGui::Spacing(); ImGui::Spacing();
+			ImGui::Text("Informations about this map :");
+			ImGui::Text("\t\tMap ID : %d", _map_id);
+			ImGui::Text("\t\tRegion : %s", map_region.c_str());
+
+			ImGui::Spacing();
+		}
+
+	}
 	void runtime::draw_overlay_menu_statistics()
 	{
 		ImGui::PushID("Statistics");
@@ -1837,7 +1943,6 @@ namespace reshade
 			ImGui::TextUnformatted("Draw Calls:");
 			ImGui::Text("Frame %llu:", _framecount + 1);
 			ImGui::TextUnformatted("Timer:");
-			ImGui::TextUnformatted("Network:");
 			ImGui::EndGroup();
 
 			ImGui::SameLine(ImGui::GetWindowWidth() * 0.333f);
@@ -1851,7 +1956,6 @@ namespace reshade
 			ImGui::Text("%u (%u vertices)", _drawcalls, _vertices);
 			ImGui::Text("%f ms", _last_frame_duration.count() * 1e-6f);
 			ImGui::Text("%f ms", std::fmod(std::chrono::duration_cast<std::chrono::nanoseconds>(_last_present_time - _start_time).count() * 1e-6f, 16777216.0f));
-			ImGui::Text("%u B", g_network_traffic);
 			ImGui::EndGroup();
 
 			ImGui::SameLine(ImGui::GetWindowWidth() * 0.666f);

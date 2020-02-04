@@ -214,8 +214,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 			g_module_handle = hModule;
 			runtime::s_reshade_dll_path = filesystem::get_module_path(hModule);
 			runtime::s_target_executable_path = filesystem::get_module_path(nullptr);
-
-			log::open(filesystem::path(runtime::s_reshade_dll_path).replace_extension(".log"));
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons").wstring().c_str(), NULL);
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook").wstring().c_str(), NULL);
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook\\Shaders").wstring().c_str(), NULL);
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook\\Textures").wstring().c_str(), NULL);
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook\\Presets").wstring().c_str(), NULL);
+			CreateDirectory((runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook\\Screenshots").wstring().c_str(), NULL);
+			
+			runtime::s_gw2hook_wrkdir_path = runtime::s_target_executable_path.parent_path() + "\\addons\\Gw2Hook\\";
+			log::open(filesystem::path(runtime::s_gw2hook_wrkdir_path).replace_extension("Gw2Hook.log"));
 
 #ifdef WIN64
 			LOG(INFO) << "Initializing crosire's ReShade version '" VERSION_STRING_FILE "' (64-bit) built on '" VERSION_DATE " " VERSION_TIME "' loaded from " << runtime::s_reshade_dll_path << " to " << runtime::s_target_executable_path << " ...";

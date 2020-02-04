@@ -412,14 +412,3 @@ EXPORTS
 	PostMessageW = HookPostMessageW
 	GetCursorPos = HookGetCursorPosition
 	SetCursorPos = HookSetCursorPosition
-
-	; ws2_32.dll
-	send = HookSend
-	sendto = HookSendTo
-	recv = HookRecv
-	recvfrom = HookRecvFrom
-	WSASend = HookWSASend
-	WSASendTo = HookWSASendTo
-	WSARecv = HookWSARecv
-	WSARecvEx = HookWSARecvEx
-	WSARecvFrom = HookWSARecvFrom

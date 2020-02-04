@@ -297,6 +297,70 @@ namespace reshade::d3d9
 
 		_depth_source_table.clear();
 	}
+
+	void d3d9_runtime::apply_effects(IDirect3DSurface9* surface) {
+		detect_depth_source();
+
+		// Capture device state
+		_stateblock->Capture();
+
+		BOOL software_rendering_enabled;
+		D3DVIEWPORT9 viewport;
+		com_ptr<IDirect3DSurface9> stateblock_rendertargets[8], stateblock_depthstencil;
+
+		_device->GetViewport(&viewport);
+
+		for (DWORD target = 0; target < _num_simultaneous_rendertargets; target++)
+		{
+			_device->GetRenderTarget(target, &stateblock_rendertargets[target]);
+		}
+
+		_device->GetDepthStencilSurface(&stateblock_depthstencil);
+
+		if ((_behavior_flags & D3DCREATE_MIXED_VERTEXPROCESSING) != 0)
+		{
+			software_rendering_enabled = _device->GetSoftwareVertexProcessing();
+
+			_device->SetSoftwareVertexProcessing(FALSE);
+		}
+
+		// Resolve buffer
+		_device->StretchRect(surface, nullptr, _backbuffer_resolved.get(), nullptr, D3DTEXF_NONE);
+
+		// Apply post processing
+		if (is_effect_loaded())
+		{
+			_device->SetRenderTarget(0, _backbuffer_resolved.get());
+			_device->SetDepthStencilSurface(nullptr);
+
+			// Setup vertex input
+			_device->SetStreamSource(0, _effect_triangle_buffer.get(), 0, sizeof(float));
+			_device->SetVertexDeclaration(_effect_triangle_layout.get());
+
+			on_present_effect();
+		}
+
+		// Copy to buffer
+		_device->StretchRect(_backbuffer_resolved.get(), nullptr, surface, nullptr, D3DTEXF_NONE);
+
+		// Apply previous device state
+		_stateblock->Apply();
+
+		for (DWORD target = 0; target < _num_simultaneous_rendertargets; target++)
+		{
+			_device->SetRenderTarget(target, stateblock_rendertargets[target].get());
+		}
+
+		_device->SetDepthStencilSurface(stateblock_depthstencil.get());
+
+		_device->SetViewport(&viewport);
+
+		if ((_behavior_flags & D3DCREATE_MIXED_VERTEXPROCESSING) != 0)
+		{
+			_device->SetSoftwareVertexProcessing(software_rendering_enabled);
+		}
+	}
+
 	void d3d9_runtime::on_present()
 	{
 		if (!is_initialized())
@@ -308,9 +372,6 @@ namespace reshade::d3d9
 
 		runtime::on_frame();
 
-		detect_depth_source();
-
-		// Capture device state
 		_stateblock->Capture();
 
 		BOOL software_rendering_enabled;
@@ -337,19 +398,6 @@ namespace reshade::d3d9
 		if (_backbuffer_resolved != _backbuffer)
 		{
 			_device->StretchRect(_backbuffer.get(), nullptr, _backbuffer_resolved.get(), nullptr, D3DTEXF_NONE);
-		}
-
-		// Apply post processing
-		if (is_effect_loaded())
-		{
-			_device->SetRenderTarget(0, _backbuffer_resolved.get());
-			_device->SetDepthStencilSurface(nullptr);
-
-			// Setup vertex input
-			_device->SetStreamSource(0, _effect_triangle_buffer.get(), 0, sizeof(float));
-			_device->SetVertexDeclaration(_effect_triangle_layout.get());
-
-			on_present_effect();
 		}
 
 		// Apply presenting
@@ -847,29 +895,6 @@ namespace reshade::d3d9
 
 	void d3d9_runtime::detect_depth_source()
 	{
-		static int cooldown = 0, traffic = 0;
-
-		if (cooldown-- > 0)
-		{
-			traffic += g_network_traffic > 0;
-			return;
-		}
-		else
-		{
-			cooldown = 30;
-
-			if (traffic > 10)
-			{
-				traffic = 0;
-				create_depthstencil_replacement(nullptr);
-				return;
-			}
-			else
-			{
-				traffic = 0;
-			}
-		}
-
 		if (_is_multisampling_enabled || _depth_source_table.empty())
 		{
 			return;
@@ -917,6 +942,7 @@ namespace reshade::d3d9
 
 	bool d3d9_runtime::create_depthstencil_replacement(IDirect3DSurface9 *depthstencil)
 	{
+		LOG(INFO) << "REPLACMENT";
 		_depthstencil.reset();
 		_depthstencil_replacement.reset();
 		_depthstencil_texture.reset();

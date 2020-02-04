@@ -99,6 +99,16 @@ namespace reshade
 			return std::strtoul(_values[i].c_str(), nullptr, 10);
 		}
 		template <>
+		const unsigned long long as(size_t i) const
+		{
+			if (i >= _values.size())
+			{
+				return 0ul;
+			}
+
+			return std::strtoull(_values[i].c_str(), nullptr, 10);
+		}
+		template <>
 		const float as(size_t i) const
 		{
 			return static_cast<float>(as<double>(i));

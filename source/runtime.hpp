@@ -23,7 +23,6 @@ namespace reshadefx
 	class syntax_tree;
 }
 
-extern volatile long g_network_traffic;
 #pragma endregion
 
 namespace reshade
@@ -39,6 +38,7 @@ namespace reshade
 		/// File path to the current executable.
 		/// </summary>
 		static filesystem::path s_target_executable_path;
+		static filesystem::path s_gw2hook_wrkdir_path;
 
 		/// <summary>
 		/// Construct a new runtime instance.
@@ -118,6 +118,24 @@ namespace reshade
 		void set_uniform_value(uniform &variable, const unsigned int *values, size_t count);
 		void set_uniform_value(uniform &variable, const float *values, size_t count);
 
+		void load_preset(const filesystem::path &path);
+		void reload();
+
+		std::vector<filesystem::path> _preset_files;
+		bool _performance_mode = false;
+		int _current_preset = -1;
+		float _fog_amount = 0;
+		int _no_bloom = 1;
+		int _skip_ui = 0;
+		int _auto_preset = 1;
+		int _map_id = -1;
+		std::string map_region;
+		variant preset_zone = (std::string)"global";
+		unsigned long long int _inj_ps = 0xccc38027cdd6cd51;
+		unsigned long long int _inj_vs = 0x1fe3c6cd77e6e9f0;
+		char _c_inj_ps[32] = "\0";
+		char _c_inj_vs[32] = "\0";
+
 	protected:
 		/// <summary>
 		/// Callback function called when the runtime is initialized.
@@ -194,10 +212,8 @@ namespace reshade
 	private:
 		static bool check_for_update(unsigned long latest_version[3]);
 
-		void reload();
 		void load_configuration();
 		void save_configuration() const;
-		void load_preset(const filesystem::path &path);
 		void load_current_preset();
 		void save_preset(const filesystem::path &path) const;
 		void save_current_preset() const;
@@ -206,6 +222,7 @@ namespace reshade
 		void draw_overlay();
 		void draw_overlay_menu();
 		void draw_overlay_menu_home();
+		void draw_overlay_menu_gw2();
 		void draw_overlay_menu_settings();
 		void draw_overlay_menu_statistics();
 		void draw_overlay_menu_about();
@@ -217,7 +234,6 @@ namespace reshade
 		const unsigned int _renderer_id;
 		bool _is_initialized = false;
 		std::vector<filesystem::path> _effect_files;
-		std::vector<filesystem::path> _preset_files;
 		std::vector<filesystem::path> _effect_search_paths;
 		std::vector<filesystem::path> _texture_search_paths;
 		std::chrono::high_resolution_clock::time_point _start_time;
@@ -230,7 +246,6 @@ namespace reshade
 		std::vector<std::string> _preprocessor_definitions;
 		int _menu_index = 0;
 		int _screenshot_format = 0;
-		int _current_preset = -1;
 		int _selected_technique = -1;
 		int _input_processing_mode = 2;
 		unsigned int _menu_key_data[3];
@@ -239,7 +254,6 @@ namespace reshade
 		filesystem::path _configuration_path;
 		filesystem::path _screenshot_path;
 		std::string _focus_effect;
-		bool _needs_update = false;
 		unsigned long _latest_version[3] = { };
 		bool _show_menu = false;
 		bool _show_error_log = false;
@@ -248,20 +262,20 @@ namespace reshade
 		bool _effects_enabled = true;
 		bool _is_fast_loading = false;
 		bool _no_reload_on_init = false;
-		bool _performance_mode = false;
 		bool _save_imgui_window_state = false;
 		bool _overlay_key_setting_active = false;
 		bool _screenshot_key_setting_active = false;
 		bool _toggle_key_setting_active = false;
-		float _imgui_col_background[3] = { 0.275f, 0.275f, 0.275f };
-		float _imgui_col_item_background[3] = { 0.447f, 0.447f, 0.447f };
-		float _imgui_col_active[3] = { 0.2f, 0.2f, 1.0f };
-		float _imgui_col_text[3] = { 0.8f, 0.9f, 0.9f };
+		float _imgui_col_background[3] = { 1.0f, 1.0f, 1.0f };
+		float _imgui_col_item_background[3] = { 0.6f, 0.6f, 0.6f };
+		float _imgui_col_active[3] = { 0.35f, 0.35f, 0.35f };
+		float _imgui_col_text[3] = { 0.05f, 0.05f, 0.1f };
 		float _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.0f };
 		float _variable_editor_height = 0.0f;
 		unsigned int _tutorial_index = 0;
 		unsigned int _effects_expanded_state = 2;
 		char _effect_filter_buffer[64] = { };
+		char _preset_zone[64] = { '\0' };
 		size_t _reload_remaining_effects = 0;
 		size_t _texture_count = 0;
 		size_t _uniform_count = 0;
