@@ -62,8 +62,10 @@ namespace reshade
 		imgui_io.KeyMap[ImGuiKey_PageDown] = 0x22; // VK_NEXT
 		imgui_io.KeyMap[ImGuiKey_Home] = 0x24; // VK_HOME
 		imgui_io.KeyMap[ImGuiKey_End] = 0x23; // VK_END
+		imgui_io.KeyMap[ImGuiKey_Insert] = 0x2D; // VK_INSERT
 		imgui_io.KeyMap[ImGuiKey_Delete] = 0x2E; // VK_DELETE
 		imgui_io.KeyMap[ImGuiKey_Backspace] = 0x08; // VK_BACK
+		imgui_io.KeyMap[ImGuiKey_Space] = 0x20; // VK_SPACE
 		imgui_io.KeyMap[ImGuiKey_Enter] = 0x0D; // VK_RETURN
 		imgui_io.KeyMap[ImGuiKey_Escape] = 0x1B; // VK_ESCAPE
 		imgui_io.KeyMap[ImGuiKey_A] = 'A';
@@ -72,6 +74,8 @@ namespace reshade
 		imgui_io.KeyMap[ImGuiKey_X] = 'X';
 		imgui_io.KeyMap[ImGuiKey_Y] = 'Y';
 		imgui_io.KeyMap[ImGuiKey_Z] = 'Z';
+		imgui_io.NavActive = true;
+		imgui_io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard;
 		imgui_style.WindowRounding = 0.0f;
 		imgui_style.WindowBorderSize = 0.0f;
 		imgui_style.ChildRounding = 0.0f;
@@ -539,7 +543,11 @@ namespace reshade
 		LOG(INFO) << "Compiling " << path << " ...";
 
 		reshadefx::preprocessor pp;
-		pp.add_include_path(path.parent_path());
+
+		if (path.is_absolute())
+		{
+			pp.add_include_path(path.parent_path());
+		}
 
 		for (const auto &include_path : _effect_search_paths)
 		{
@@ -855,12 +863,16 @@ namespace reshade
 			std::vector<std::string> techniques;
 			preset.get("", "Techniques", techniques);
 
-			if (std::find(_preset_files.begin(), _preset_files.end(), preset_file) == _preset_files.end() && !techniques.empty())
+			if (!techniques.empty() && std::find_if(_preset_files.begin(), _preset_files.end(),
+				[&preset_file, &parent_path](const auto &path) {
+					return preset_file.filename() == path.filename() && (path.parent_path() == parent_path || !path.is_absolute());
+				}) == _preset_files.end())
 			{
 				_preset_files.push_back(preset_file);
 			}
 		}
 
+#if 0
 		auto to_absolute = [&parent_path](auto &paths) {
 			for (auto &path : paths)
 				path = filesystem::absolute(path, parent_path);
@@ -869,6 +881,7 @@ namespace reshade
 		to_absolute(_preset_files);
 		to_absolute(_effect_search_paths);
 		to_absolute(_texture_search_paths);
+#endif
 	}
 	void runtime::save_configuration() const
 	{
@@ -1046,6 +1059,11 @@ namespace reshade
 				effects_files.emplace(technique.effect_filename);
 
 				preset.set("", "Key" + technique.name, technique.toggle_key_data);
+			}
+			else if (int value = 0; preset.get("", "Key" + technique.name, value), value != 0)
+			{
+				// Clear toggle key data
+				preset.set("", "Key" + technique.name, 0);
 			}
 		}
 
@@ -2142,6 +2160,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 	{
 		ImGui::PushItemWidth(ImGui::GetWindowWidth() * 0.5f);
 
+		bool open_tutorial_popup = false;
 		bool current_tree_is_closed = true;
 		std::string current_filename;
 		std::string current_category;
@@ -2233,15 +2252,25 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 					if (ui_type == "drag")
 					{
-						modified = ImGui::DragIntN(ui_label.c_str(), data, variable.rows, variable.annotations["ui_step"].as<float>(), variable.annotations["ui_min"].as<int>(), variable.annotations["ui_max"].as<int>(), nullptr);
+						const int ui_min = variable.annotations["ui_min"].as<int>();
+						const int ui_max = variable.annotations["ui_max"].as<int>();
+						const float ui_step = variable.annotations["ui_step"].as<float>();
+
+						modified = ImGui::DragScalarN(ui_label.c_str(), ImGuiDataType_S32, data, variable.rows, ui_step, &ui_min, &ui_max);
 					}
 					else if (ui_type == "combo")
 					{
-						modified = ImGui::Combo(ui_label.c_str(), data, variable.annotations["ui_items"].as<std::string>().c_str());
+						std::string items = variable.annotations["ui_items"].as<std::string>();
+
+						// Make sure list is terminated with a zero in case user forgot so no invalid memory is read accidentally
+						if (!items.empty() && items.back() != '\0')
+							items.push_back('\0');
+
+						modified = ImGui::Combo(ui_label.c_str(), data, items.c_str());
 					}
 					else
 					{
-						modified = ImGui::InputIntN(ui_label.c_str(), data, variable.rows, 0);
+						modified = ImGui::InputScalarN(ui_label.c_str(), ImGuiDataType_S32, data, variable.rows);
 					}
 
 					if (modified)
@@ -2257,11 +2286,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 					if (ui_type == "drag")
 					{
-						modified = ImGui::DragFloatN(ui_label.c_str(), data, variable.rows, variable.annotations["ui_step"].as<float>(), variable.annotations["ui_min"].as<float>(), variable.annotations["ui_max"].as<float>(), "%.3f", 1.0f);
+						const float ui_min = variable.annotations["ui_min"].as<float>();
+						const float ui_max = variable.annotations["ui_max"].as<float>();
+						const float ui_step = variable.annotations["ui_step"].as<float>();
+
+						modified = ImGui::DragScalarN(ui_label.c_str(), ImGuiDataType_Float, data, variable.rows, ui_step, &ui_min, &ui_max, "%.3f");
 					}
 					else if (ui_type == "input" || (ui_type.empty() && variable.rows < 3))
 					{
-						modified = ImGui::InputFloatN(ui_label.c_str(), data, variable.rows, 8, 0);
+						modified = ImGui::InputScalarN(ui_label.c_str(), ImGuiDataType_Float, data, variable.rows);
 					}
 					else if (variable.rows == 3)
 					{
@@ -2291,10 +2324,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 			{
 				save_current_preset();
 
-				if (_tutorial_index == 4)
-				{
-					ImGui::OpenPopup("Performance Mode Hint");
-				}
+				open_tutorial_popup = _tutorial_index == 4;
 			}
 		}
 
@@ -2304,6 +2334,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 		}
 
 		ImGui::PopItemWidth();
+
+		if (open_tutorial_popup)
+		{
+			ImGui::OpenPopup("Performance Mode Hint");
+		}
 
 		ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
 
