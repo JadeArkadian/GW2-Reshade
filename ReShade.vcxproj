@@ -301,6 +301,7 @@
     <ClCompile Include="source\filesystem.cpp" />
     <ClCompile Include="source\gw2\gw2_table.cpp" />
     <ClCompile Include="source\gw2\hook_gw2.cpp" />
+    <ClCompile Include="source\gui.cpp" />
     <ClCompile Include="source\hook.cpp" />
     <ClCompile Include="source\hook_manager.cpp" />
     <ClCompile Include="source\ini_file.cpp" />
