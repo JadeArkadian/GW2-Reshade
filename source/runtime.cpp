@@ -161,7 +161,7 @@ namespace reshade
 		_uniform_count = 0;
 		_technique_count = 0;
 	}
-	void runtime::on_frame()
+	void runtime::on_present()
 	{
 		// Get current time and date
 		time_t t = std::time(nullptr); tm tm;
@@ -176,44 +176,6 @@ namespace reshade
 		_last_frame_duration = std::chrono::high_resolution_clock::now() - _last_present_time;
 		_last_present_time += _last_frame_duration;
 
-		// Update ImGui configuration
-		ImGui::SetCurrentContext(_imgui_context);
-		auto &imgui_io = _imgui_context->IO;
-		imgui_io.DeltaTime = _last_frame_duration.count() * 1e-9f;
-		imgui_io.MouseDrawCursor = _show_menu;
-
-		imgui_io.KeyCtrl = _input->is_key_down(0x11); // VK_CONTROL
-		imgui_io.KeyShift = _input->is_key_down(0x10); // VK_SHIFT
-		imgui_io.KeyAlt = _input->is_key_down(0x12); // VK_MENU
-		imgui_io.MousePos.x = static_cast<float>(_input->mouse_position_x());
-		imgui_io.MousePos.y = static_cast<float>(_input->mouse_position_y());
-		imgui_io.MouseWheel += _input->mouse_wheel_delta();
-
-		for (unsigned int i = 0; i < 256; i++)
-		{
-			imgui_io.KeysDown[i] = _input->is_key_down(i);
-
-			if (_input->is_key_pressed(i))
-			{
-				imgui_io.AddInputCharacter(_input->key_to_text(i));
-			}
-		}
-		for (unsigned int i = 0; i < 5; i++)
-		{
-			imgui_io.MouseDown[i] = _input->is_mouse_button_down(i);
-		}
-
-		if (imgui_io.KeyCtrl)
-		{
-			// Change global font scale if user presses the control key and moves the mouse wheel
-			imgui_io.FontGlobalScale = ImClamp(imgui_io.FontGlobalScale + imgui_io.MouseWheel * 0.10f, 0.2f, 2.50f);
-		}
-
-		ImGui::NewFrame();
-
-	}
-	void runtime::on_present()
-	{
 		// Create and save screenshot if associated shortcut is down
 		if (!_screenshot_key_setting_active &&
 			_input->is_key_pressed(_screenshot_key_data[0], _screenshot_key_data[1] != 0, _screenshot_key_data[2] != 0, false))
@@ -1166,6 +1128,41 @@ namespace reshade
 
 		_effects_expanded_state &= 2;
 
+		// Update ImGui configuration
+		ImGui::SetCurrentContext(_imgui_context);
+		auto &imgui_io = _imgui_context->IO;
+		imgui_io.DeltaTime = _last_frame_duration.count() * 1e-9f;
+		imgui_io.MouseDrawCursor = _show_menu;
+
+		imgui_io.KeyCtrl = _input->is_key_down(0x11); // VK_CONTROL
+		imgui_io.KeyShift = _input->is_key_down(0x10); // VK_SHIFT
+		imgui_io.KeyAlt = _input->is_key_down(0x12); // VK_MENU
+		imgui_io.MousePos.x = static_cast<float>(_input->mouse_position_x());
+		imgui_io.MousePos.y = static_cast<float>(_input->mouse_position_y());
+		imgui_io.MouseWheel += _input->mouse_wheel_delta();
+
+		for (unsigned int i = 0; i < 256; i++)
+		{
+			imgui_io.KeysDown[i] = _input->is_key_down(i);
+
+			if (_input->is_key_pressed(i))
+			{
+				imgui_io.AddInputCharacter(_input->key_to_text(i));
+			}
+		}
+		for (unsigned int i = 0; i < 5; i++)
+		{
+			imgui_io.MouseDown[i] = _input->is_mouse_button_down(i);
+		}
+
+		if (imgui_io.KeyCtrl)
+		{
+			// Change global font scale if user presses the control key and moves the mouse wheel
+			imgui_io.FontGlobalScale = ImClamp(imgui_io.FontGlobalScale + imgui_io.MouseWheel * 0.10f, 0.2f, 2.50f);
+		}
+
+		ImGui::NewFrame();
+
 		// Create ImGui widgets and windows
 		if (show_splash)
 		{
@@ -1254,18 +1251,21 @@ namespace reshade
 				{
 					// Need to do a full reload since some effects might be missing due to fast loading
 					reload();
-					return;
+
+					assert(!_is_fast_loading);
 				}
+				else
+				{
+					ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+					ImGui::SetNextWindowSize(ImVec2(730, 650), ImGuiCond_FirstUseEver);
+					ImGui::Begin("ReShade " VERSION_STRING_FILE " by crosire###Main", &_show_menu,
+						ImGuiWindowFlags_MenuBar |
+						ImGuiWindowFlags_NoCollapse);
 
-				ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-				ImGui::SetNextWindowSize(ImVec2(730, 650), ImGuiCond_FirstUseEver);
-				ImGui::Begin("Gw2 Hook " VERSION_STRING_FILE "###Main", &_show_menu,
-					ImGuiWindowFlags_MenuBar |
-					ImGuiWindowFlags_NoCollapse);
+					draw_overlay_menu();
 
-				draw_overlay_menu();
-
-				ImGui::End();
+					ImGui::End();
+				}
 			}
 		}
 
@@ -1319,6 +1319,11 @@ namespace reshade
 			"Before we continue: If you have difficulties reading this text, press the 'Ctrl' key and adjust the text size with your mouse wheel. "
 			"The window size is variable as well, just grab the bottom right corner and move it around.\n\n"
 			"Click on the 'Continue' button to continue the tutorial.";
+
+		if (_performance_mode && _tutorial_index <= 3)
+		{
+			_tutorial_index = 4;
+		}
 
 		if (_tutorial_index > 0)
 		{

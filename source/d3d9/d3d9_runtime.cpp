@@ -299,6 +299,7 @@ namespace reshade::d3d9
 	}
 
 	void d3d9_runtime::apply_effects(IDirect3DSurface9* surface) {
+
 		detect_depth_source();
 
 		// Capture device state
@@ -369,8 +370,6 @@ namespace reshade::d3d9
 		// Begin post processing
 		if (FAILED(_device->BeginScene()))
 			return;
-
-		runtime::on_frame();
 
 		_stateblock->Capture();
 
