@@ -40,7 +40,7 @@ namespace reshade
 		_screenshot_key_data(),
 		_effects_key_data(),
 		_screenshot_path(s_gw2hook_wrkdir_path + "Screenshots"),
-		_variable_editor_height(300)
+		_variable_editor_height(500)
 	{
 		_menu_key_data[0] = 0x71; // VK_F2
 		_menu_key_data[2] = true; // VK_SHIFT
@@ -74,7 +74,6 @@ namespace reshade
 		imgui_io.KeyMap[ImGuiKey_X] = 'X';
 		imgui_io.KeyMap[ImGuiKey_Y] = 'Y';
 		imgui_io.KeyMap[ImGuiKey_Z] = 'Z';
-		imgui_io.NavActive = true;
 		imgui_io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard;
 		imgui_style.WindowRounding = 0.0f;
 		imgui_style.WindowBorderSize = 0.0f;
@@ -214,7 +213,7 @@ namespace reshade
 	}
 	void runtime::on_present_effect()
 	{
-		if (_input->is_key_pressed(_effects_key_data[0], _effects_key_data[1] != 0, _effects_key_data[2] != 0, false))
+		if (!_toggle_key_setting_active && _input->is_key_pressed(_effects_key_data[0], _effects_key_data[1] != 0, _effects_key_data[2] != 0, _effects_key_data[3] != 0))
 		{
 			_effects_enabled = !_effects_enabled;
 		}
@@ -384,7 +383,9 @@ namespace reshade
 
 				if (index >= 0 && index < 5)
 				{
-					if (variable.annotations["toggle"].as<bool>())
+					const std::string mode = variable.annotations["mode"].as<std::string>();
+
+					if (mode == "toggle" || variable.annotations["toggle"].as<bool>())
 					{
 						bool current = false;
 						get_uniform_value(variable, &current, 1);
@@ -395,6 +396,12 @@ namespace reshade
 
 							set_uniform_value(variable, &current, 1);
 						}
+					}
+					else if (mode == "press")
+					{
+						const bool state = _input->is_mouse_button_pressed(index);
+
+						set_uniform_value(variable, &state, 1);
 					}
 					else
 					{
@@ -743,6 +750,7 @@ namespace reshade
 		config.get("GENERAL", "ShowClock", _show_clock);
 		config.get("GENERAL", "ShowFPS", _show_framerate);
 		config.get("GENERAL", "FontGlobalScale", _imgui_context->IO.FontGlobalScale);
+		config.get("GENERAL", "NoFontScaling", _no_font_scaling);
 		config.get("GENERAL", "NoReloadOnInit", _no_reload_on_init);
 		config.get("GENERAL", "SaveWindowState", _save_imgui_window_state);
 
@@ -1121,7 +1129,7 @@ namespace reshade
 		const bool show_splash = (_last_present_time - _last_reload_time) < std::chrono::seconds(5);
 
 		if (!_overlay_key_setting_active &&
-			_input->is_key_pressed(_menu_key_data[0], _menu_key_data[1], _menu_key_data[2], false))
+			_input->is_key_pressed(_menu_key_data[0], _menu_key_data[1], _menu_key_data[2], _menu_key_data[3]))
 		{
 			_show_menu = !_show_menu;
 		}
@@ -1155,7 +1163,7 @@ namespace reshade
 			imgui_io.MouseDown[i] = _input->is_mouse_button_down(i);
 		}
 
-		if (imgui_io.KeyCtrl)
+		if (imgui_io.KeyCtrl && !_no_font_scaling)
 		{
 			// Change global font scale if user presses the control key and moves the mouse wheel
 			imgui_io.FontGlobalScale = ImClamp(imgui_io.FontGlobalScale + imgui_io.MouseWheel * 0.10f, 0.2f, 2.50f);
@@ -1191,9 +1199,10 @@ namespace reshade
 			else
 			{
 				ImGui::Text(
-					"Press '%s%s%s' to open the configuration menu.",
+					"Press '%s%s%s%s' to open the configuration menu.",
 					_menu_key_data[1] ? "Ctrl + " : "",
 					_menu_key_data[2] ? "Shift + " : "",
+					_menu_key_data[3] ? "Alt + " : "",
 					keyboard_keys[_menu_key_data[0]]);
 			}
 
@@ -1225,7 +1234,7 @@ namespace reshade
 					const int hour = _date[3] / 3600;
 					const int minute = (_date[3] - hour * 3600) / 60;
 
-					ImFormatString(temp, sizeof(temp), " %02u%s%02u", hour, _date[3] % 2 ? ":" : " ", minute);
+					ImFormatString(temp, sizeof(temp), " %02u:%02u", hour, minute);
 					ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
 					ImGui::TextUnformatted(temp);
 				}
@@ -1256,8 +1265,8 @@ namespace reshade
 				}
 				else
 				{
-					ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-					ImGui::SetNextWindowSize(ImVec2(730, 650), ImGuiCond_FirstUseEver);
+					ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+					ImGui::SetNextWindowSize(ImVec2(std::min(730.0f, _width / 3.0f), _height - 40.0f), ImGuiCond_FirstUseEver);
 					ImGui::Begin("ReShade " VERSION_STRING_FILE " by crosire###Main", &_show_menu,
 						ImGuiWindowFlags_MenuBar |
 						ImGuiWindowFlags_NoCollapse);
@@ -1275,7 +1284,10 @@ namespace reshade
 		_input->block_mouse_input(_input_processing_mode != 0 && _show_menu && (_imgui_context->IO.WantCaptureMouse || _input_processing_mode == 2));
 		_input->block_keyboard_input(_input_processing_mode != 0 && _show_menu && (_imgui_context->IO.WantCaptureKeyboard || _input_processing_mode == 2));
 
-		render_imgui_draw_data(ImGui::GetDrawData());
+		if (const auto draw_data = ImGui::GetDrawData(); draw_data != nullptr && draw_data->CmdListsCount != 0 && draw_data->TotalVtxCount != 0)
+		{
+			render_imgui_draw_data(draw_data);
+		}
 	}
 	void runtime::draw_overlay_menu()
 	{
@@ -1309,9 +1321,10 @@ namespace reshade
 	{
 		if (!_effects_enabled)
 		{
-			ImGui::Text("Effects are disabled. Press '%s%s%s' to enable them again.",
+			ImGui::Text("Effects are disabled. Press '%s%s%s%s' to enable them again.",
 				_effects_key_data[1] ? "Ctrl + " : "",
 				_effects_key_data[2] ? "Shift + " : "",
+				_effects_key_data[3] ? "Alt + " : "",
 				keyboard_keys[_effects_key_data[0]]);
 		}
 
@@ -1581,10 +1594,35 @@ namespace reshade
 	{
 		char edit_buffer[2048];
 
-		const auto copy_key_shortcut_to_edit_buffer = [&edit_buffer](const auto &shortcut) {
+		const auto update_key_data = [&](unsigned int key_data[4]) {
+			const unsigned int last_key_pressed = _input->last_key_pressed();
+
+			if (last_key_pressed != 0)
+			{
+				if (last_key_pressed == 0x08) // Backspace
+				{
+					key_data[0] = 0;
+					key_data[1] = 0;
+					key_data[2] = 0;
+					key_data[3] = 0;
+				}
+				else if (last_key_pressed < 0x10 || last_key_pressed > 0x12)
+				{
+					key_data[0] = last_key_pressed;
+					key_data[1] = _input->is_key_down(0x11);
+					key_data[2] = _input->is_key_down(0x10);
+					key_data[3] = _input->is_key_down(0x12);
+				}
+
+				save_config();
+			}
+		};
+
+		const auto copy_key_shortcut_to_edit_buffer = [&edit_buffer](const unsigned int shortcut[4]) {
 			size_t offset = 0;
 			if (shortcut[1]) memcpy(edit_buffer, "Ctrl + ", 8), offset += 7;
 			if (shortcut[2]) memcpy(edit_buffer + offset, "Shift + ", 9), offset += 8;
+			if (shortcut[3]) memcpy(edit_buffer + offset, "Alt + ", 7), offset += 6;
 			memcpy(edit_buffer + offset, keyboard_keys[shortcut[0]], sizeof(*keyboard_keys));
 		};
 		const auto copy_vector_to_edit_buffer = [&edit_buffer](const std::vector<std::string> &data) {
@@ -1624,16 +1662,7 @@ namespace reshade
 			{
 				_overlay_key_setting_active = true;
 
-				const unsigned int last_key_pressed = _input->last_key_pressed();
-
-				if (last_key_pressed != 0 && (last_key_pressed < 0x10 || last_key_pressed > 0x11))
-				{
-					_menu_key_data[0] = last_key_pressed;
-					_menu_key_data[1] = _input->is_key_down(0x11);
-					_menu_key_data[2] = _input->is_key_down(0x10);
-
-					save_config();
-				}
+				update_key_data(_menu_key_data);
 			}
 			else if (ImGui::IsItemHovered())
 			{
@@ -1646,18 +1675,13 @@ namespace reshade
 
 			ImGui::InputText("Effects Toggle Key", edit_buffer, sizeof(edit_buffer), ImGuiInputTextFlags_ReadOnly);
 
+			_toggle_key_setting_active = false;
+
 			if (ImGui::IsItemActive())
 			{
-				const unsigned int last_key_pressed = _input->last_key_pressed();
+				_toggle_key_setting_active = true;
 
-				if (last_key_pressed != 0 && (last_key_pressed < 0x10 || last_key_pressed > 0x11))
-				{
-					_effects_key_data[0] = last_key_pressed;
-					_effects_key_data[1] = _input->is_key_down(0x11);
-					_effects_key_data[2] = _input->is_key_down(0x10);
-
-					save_config();
-				}
+				update_key_data(_effects_key_data);
 			}
 			else if (ImGui::IsItemHovered())
 			{
@@ -1728,16 +1752,7 @@ namespace reshade
 			{
 				_screenshot_key_setting_active = true;
 
-				const unsigned int last_key_pressed = _input->last_key_pressed();
-
-				if (last_key_pressed != 0 && (last_key_pressed < 0x10 || last_key_pressed > 0x11))
-				{
-					_screenshot_key_data[0] = last_key_pressed;
-					_screenshot_key_data[1] = _input->is_key_down(0x11);
-					_screenshot_key_data[2] = _input->is_key_down(0x10);
-
-					save_config();
-				}
+				update_key_data(_screenshot_key_data);
 			}
 			else if (ImGui::IsItemHovered())
 			{
@@ -2019,16 +2034,24 @@ namespace reshade
 	}
 	void runtime::draw_overlay_menu_log()
 	{
+		if (ImGui::Button("Clear Log"))
+		{
+			reshade::log::lines.clear();
+		}
+
+		ImGui::SameLine();
+		ImGui::Checkbox("Word Wrap", &_log_wordwrap);
+		ImGui::SameLine();
+
 		static ImGuiTextFilter filter; // TODO: Better make this a member of the runtime class, in case there are multiple instances.
-		filter.Draw();
+		filter.Draw("Filter (inc, -exc)", -150);
 
 		std::vector<std::string> lines;
 		for (auto &line : reshade::log::lines)
 			if (filter.PassFilter(line.c_str()))
 				lines.push_back(line);
 
-		ImGui::SameLine(0, 20);
-		ImGui::Checkbox("Word Wrap", &_log_wordwrap);
+		ImGui::BeginChild("log");
 
 		ImGuiListClipper clipper(static_cast<int>(lines.size()), ImGui::GetTextLineHeightWithSpacing());
 
@@ -2053,6 +2076,8 @@ namespace reshade
 		}
 
 		clipper.End();
+
+		ImGui::EndChild();
 	}
 	void runtime::draw_overlay_menu_about()
 	{
@@ -2122,6 +2147,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 		bool open_tutorial_popup = false;
 		bool current_tree_is_closed = true;
+		bool current_category_is_closed = false;
 		std::string current_filename;
 		std::string current_category;
 
@@ -2166,15 +2192,27 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 			const auto ui_tooltip = variable.annotations["ui_tooltip"].as<std::string>();
 			const auto ui_category = variable.annotations["ui_category"].as<std::string>();
 
-			if (!ui_category.empty() && current_category != ui_category)
+			if (current_category != ui_category)
 			{
-				current_category = ui_category;
+				if (!ui_category.empty())
+				{
+					std::string category;
+					for (float x = 0, space_x = ImGui::CalcTextSize(" ").x, width = (ImGui::CalcItemWidth() - ImGui::CalcTextSize(ui_category.c_str()).x) / 2 - 42; x < width; x += space_x)
+						category += ' ';
+					category += ui_category;
 
-				const float text_width = ImGui::CalcTextSize(ui_category.c_str()).x;
-				const float region_width = ImGui::CalcItemWidth();
-				ImGui::Dummy(ImVec2((region_width - text_width) / 2, 0));
-				ImGui::SameLine();
-				ImGui::TextUnformatted(ui_category.c_str());
+					current_category_is_closed = !ImGui::TreeNodeEx(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+				}
+				else
+				{
+					current_category_is_closed = false;
+				}
+
+				current_category = ui_category;
+			}
+			if (current_category_is_closed)
+			{
+				continue;
 			}
 
 			ImGui::PushID(id);
@@ -2183,24 +2221,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 			{
 				case uniform_datatype::boolean:
 				{
-					bool data[1] = { };
-					get_uniform_value(variable, data, 1);
+					bool data = false;
+					get_uniform_value(variable, &data, 1);
 
-					int index = data[0] ? 0 : 1;
-
-					if (ImGui::Combo(ui_label.c_str(), &index, "On\0Off\0"))
+					if (ImGui::Checkbox(ui_label.c_str(), &data))
 					{
-						data[0] = index == 0;
 						modified = true;
 
-						set_uniform_value(variable, data, 1);
-					}
-					else if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
-					{
-						data[0] = !data[0];
-						modified = true;
-
-						set_uniform_value(variable, data, 1);
+						set_uniform_value(variable, &data, 1);
 					}
 					break;
 				}
@@ -2360,7 +2388,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 				hovered_technique_index = id;
 			}
 
-			if (ImGui::IsItemClicked(0) && ImGui::IsMouseDoubleClicked(0))
+			if (ImGui::IsItemClicked(0))
 			{
 				_focus_effect = technique.effect_filename;
 			}

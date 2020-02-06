@@ -75,7 +75,7 @@
       <SDLCheck>true</SDLCheck>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(SolutionDir)res;$(SolutionDir)source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RESHADE_VERBOSE_LOG;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DisableSpecificWarnings>4351;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -104,7 +104,7 @@
       <SDLCheck>true</SDLCheck>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(SolutionDir)res;$(SolutionDir)source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RESHADE_VERBOSE_LOG;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DisableSpecificWarnings>4351;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -133,7 +133,7 @@
       <SDLCheck>true</SDLCheck>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(SolutionDir)res;$(SolutionDir)source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>RESHADE_TEST_APPLICATION=1;RESHADE_DUMP_NATIVE_SHADERS;D3D_DEBUG_INFO;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RESHADE_TEST_APPLICATION=2;RESHADE_VERBOSE_LOG;RESHADE_DUMP_NATIVE_SHADERS;D3D_DEBUG_INFO;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DisableSpecificWarnings>4351;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -162,7 +162,7 @@
       <SDLCheck>true</SDLCheck>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(SolutionDir)res;$(SolutionDir)source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>RESHADE_TEST_APPLICATION=1;RESHADE_DUMP_NATIVE_SHADERS;D3D_DEBUG_INFO;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>RESHADE_TEST_APPLICATION=2;RESHADE_VERBOSE_LOG;RESHADE_DUMP_NATIVE_SHADERS;D3D_DEBUG_INFO;WIN32_LEAN_AND_MEAN;NOMINMAX;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_GDI32_;WINSOCK_API_LINKAGE=;WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DisableSpecificWarnings>4351;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <ObjectFileName>$(IntDir)%(RelativeDir)</ObjectFileName>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -281,6 +281,7 @@
     <ClCompile Include="source\d3d10\d3d10_effect_compiler.cpp" />
     <ClCompile Include="source\d3d10\d3d10_runtime.cpp" />
     <ClCompile Include="source\d3d10\d3d10_stateblock.cpp" />
+    <ClCompile Include="source\d3d10\draw_call_tracker.cpp" />
     <ClCompile Include="source\d3d11\d3d11.cpp" />
     <ClCompile Include="source\d3d11\d3d11_device.cpp" />
     <ClCompile Include="source\d3d11\d3d11_device_context.cpp" />
@@ -327,6 +328,7 @@
     <ClInclude Include="source\d3d10\d3d10_effect_compiler.hpp" />
     <ClInclude Include="source\d3d10\d3d10_runtime.hpp" />
     <ClInclude Include="source\d3d10\d3d10_stateblock.hpp" />
+    <ClInclude Include="source\d3d10\draw_call_tracker.hpp" />
     <ClInclude Include="source\d3d11\d3d11.hpp" />
     <ClInclude Include="source\d3d11\d3d11_device.hpp" />
     <ClInclude Include="source\d3d11\d3d11_device_context.hpp" />

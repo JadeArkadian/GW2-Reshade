@@ -288,9 +288,9 @@ namespace reshade
 		int _screenshot_format = 0;
 		int _selected_technique = -1;
 		int _input_processing_mode = 2;
-		unsigned int _menu_key_data[3];
-		unsigned int _screenshot_key_data[3];
-		unsigned int _effects_key_data[3];
+		unsigned int _menu_key_data[4];
+		unsigned int _screenshot_key_data[4];
+		unsigned int _effects_key_data[4];
 		filesystem::path _configuration_path;
 		filesystem::path _screenshot_path;
 		std::string _focus_effect;
@@ -300,6 +300,7 @@ namespace reshade
 		bool _show_framerate = false;
 		bool _effects_enabled = true;
 		bool _is_fast_loading = false;
+		bool _no_font_scaling = false;
 		bool _no_reload_on_init = false;
 		bool _save_imgui_window_state = false;
 		bool _overlay_key_setting_active = false;
