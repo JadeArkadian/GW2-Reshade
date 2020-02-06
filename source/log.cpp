@@ -4,18 +4,31 @@
  */
 
 #include "log.hpp"
+#include <mutex>
+#include <assert.h>
 #include <Windows.h>
 
 namespace reshade::log
 {
 	std::ofstream stream;
+	std::ostringstream linestream;
+	std::vector<std::string> lines;
+	static std::mutex s_mutex;
 
 	message::message(level level)
 	{
 		SYSTEMTIME time;
 		GetLocalTime(&time);
 
-		const char level_names[][6] = { "INFO ", "ERROR", "WARN " };
+		const char level_names[][6] = { "ERROR", "WARN ", "DEBUG", "INFO " };
+		assert(static_cast<unsigned int>(level) - 1 < _countof(level_names));
+
+		// Lock the stream until the message is complete
+		s_mutex.lock();
+
+		// Start a new line
+		linestream.str("");
+		linestream.clear();
 
 		stream << std::right << std::setfill('0')
 			<< std::setw(4) << time.wYear << '-'
@@ -26,11 +39,21 @@ namespace reshade::log
 			<< std::setw(2) << time.wSecond << ':'
 			<< std::setw(3) << time.wMilliseconds << ' '
 			<< '[' << std::setw(5) << GetCurrentThreadId() << ']' << std::setfill(' ')
-			<< " | " << level_names[static_cast<unsigned int>(level)] << " | " << std::left;
+			<< " | "
+			<< level_names[static_cast<unsigned int>(level) - 1] << " | " << std::left;
+		linestream
+			<< level_names[static_cast<unsigned int>(level) - 1] << " | ";
 	}
 	message::~message()
 	{
+		// Finish the line
 		stream << std::endl;
+		linestream << std::endl;
+
+		lines.push_back(linestream.str());
+
+		// The message is finished, we can unlock the stream
+		s_mutex.unlock();
 	}
 
 	bool open(const filesystem::path &path)

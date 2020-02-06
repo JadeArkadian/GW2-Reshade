@@ -149,7 +149,6 @@ namespace reshade
 		_uniforms.clear();
 		_techniques.clear();
 		_uniform_data_storage.clear();
-		_errors.clear();
 
 		_texture_count = 0;
 		_uniform_count = 0;
@@ -592,7 +591,6 @@ namespace reshade
 		if (!pp.run(path))
 		{
 			LOG(ERROR) << "Failed to preprocess " << path << ":\n" << pp.errors();
-			_errors += path.string() + ":\n" + pp.errors();
 			return;
 		}
 
@@ -602,7 +600,6 @@ namespace reshade
 		if (!parser.run(pp.current_output()))
 		{
 			LOG(ERROR) << "Failed to compile " << path << ":\n" << parser.errors();
-			_errors += path.string() + ":\n" + parser.errors();
 			return;
 		}
 
@@ -646,7 +643,6 @@ namespace reshade
 		if (!load_effect(ast, errors))
 		{
 			LOG(ERROR) << "Failed to compile " << path << ":\n" << errors;
-			_errors += path.string() + ":\n" + errors;
 			_textures.erase(_textures.begin() + _texture_count, _textures.end());
 			_uniforms.erase(_uniforms.begin() + _uniform_count, _uniforms.end());
 			_techniques.erase(_techniques.begin() + _technique_count, _techniques.end());
@@ -659,7 +655,6 @@ namespace reshade
 		else
 		{
 			LOG(WARNING) << "> Successfully compiled with warnings:\n" << errors;
-			_errors += path.string() + ":\n" + errors;
 		}
 
 		for (size_t i = _uniform_count, max = _uniform_count = _uniforms.size(); i < max; i++)
@@ -708,8 +703,6 @@ namespace reshade
 
 			if (!filesystem::exists(path))
 			{
-				_errors += "Source '" + path.string() + "' for texture '" + texture.name + "' could not be found.\n";
-
 				LOG(ERROR) << "> Source " << path << " for texture '" << texture.name << "' could not be found.";
 				continue;
 			}
@@ -754,8 +747,6 @@ namespace reshade
 
 			if (!success)
 			{
-				_errors += "Unable to load source for texture '" + texture.name + "'!";
-
 				LOG(ERROR) << "> Source " << path << " for texture '" << texture.name << "' could not be loaded! Make sure it is of a compatible file format.";
 				continue;
 			}
@@ -1196,18 +1187,6 @@ namespace reshade
 					_menu_key_data[1] ? "Ctrl + " : "",
 					_menu_key_data[2] ? "Shift + " : "",
 					keyboard_keys[_menu_key_data[0]]);
-
-				if (_errors.find("error") != std::string::npos)
-				{
-					ImGui::SetWindowSize(ImVec2(_width - 20.0f, ImGui::GetFrameHeightWithSpacing() * 4));
-
-					ImGui::Spacing();
-					ImGui::TextColored(ImVec4(1, 0, 0, 1),
-						"There were errors compiling some shaders. "
-						"Open the configuration menu and click on 'Show Log' for more details.");
-
-					_show_error_log = true;
-				}
 			}
 
 			ImGui::End();
@@ -1267,33 +1246,6 @@ namespace reshade
 
 				ImGui::End();
 			}
-
-			if (_show_error_log)
-			{
-				ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-				ImGui::SetNextWindowSize(ImVec2(800, 300), ImGuiCond_FirstUseEver);
-				ImGui::Begin("Error Log", &_show_error_log);
-				ImGui::PushTextWrapPos();
-
-				for (const auto &line : split(_errors, '\n'))
-				{
-					ImVec4 textcol(1, 1, 1, 1);
-
-					if (line.find("error") != std::string::npos)
-					{
-						textcol = ImVec4(1, 0, 0, 1);
-					}
-					else if (line.find("warning") != std::string::npos)
-					{
-						textcol = ImVec4(1, 1, 0, 1);
-					}
-
-					ImGui::TextColored(textcol, line.c_str());
-				}
-
-				ImGui::PopTextWrapPos();
-				ImGui::End();
-			}
 		}
 
 		// Render ImGui widgets and windows
@@ -1310,9 +1262,9 @@ namespace reshade
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImGui::GetStyle().ItemSpacing * 2);
 
-			const char *const menu_items[] = { "Home", "Gw2 Settings", "Settings", "Statistics", "About" };
+			const char *const menu_items[] = { "Home", "Gw2 Settings", "Settings", "Statistics", "Log", "About" };
 
-			for (int i = 0; i < 5; i++)
+			for (int i = 0; i < _countof(menu_items); i++)
 			{
 				if (ImGui::Selectable(menu_items[i], _menu_index == i, 0, ImVec2(ImGui::CalcTextSize(menu_items[i]).x, 0)))
 				{
@@ -1341,6 +1293,9 @@ namespace reshade
 			draw_overlay_menu_statistics();
 			break;
 		case 4:
+			draw_overlay_menu_log();
+			break;
+		case 5:
 			draw_overlay_menu_about();
 			break;
 		}
@@ -1592,17 +1547,12 @@ namespace reshade
 		{
 			ImGui::Spacing();
 
-			if (ImGui::Button("Reload", ImVec2(ImGui::GetWindowContentRegionWidth() * 0.5f - 5, 0)))
+			if (ImGui::Button("Reload", ImVec2(-1, 0)))
 			{
 				reload();
 			}
 
 			ImGui::SameLine();
-
-			if (ImGui::Button("Show Log", ImVec2(ImGui::GetWindowContentRegionWidth() * 0.5f - 5, 0)))
-			{
-				_show_error_log = true;
-			}
 		}
 		else
 		{
@@ -1649,8 +1599,8 @@ namespace reshade
 			edit_buffer[0] = '\0';
 			for (const auto &search_path : search_paths)
 			{
-				memcpy(edit_buffer + offset, search_path.string().c_str(), search_path.length());
-				offset += search_path.length();
+				memcpy(edit_buffer + offset, search_path.string().c_str(), search_path.string().length());
+				offset += search_path.string().length();
 				edit_buffer[offset++] = '\n';
 				edit_buffer[offset] = '\0';
 			}
@@ -1790,7 +1740,7 @@ namespace reshade
 				ImGui::SetTooltip("Click in the field and press any key to change the shortcut to that key.");
 			}
 
-			memcpy(edit_buffer, _screenshot_path.string().c_str(), _screenshot_path.length() + 1);
+			memcpy(edit_buffer, _screenshot_path.string().c_str(), _screenshot_path.string().length() + 1);
 
 			if (ImGui::InputText("Screenshot Path", edit_buffer, sizeof(edit_buffer)))
 			{
@@ -2087,6 +2037,47 @@ namespace reshade
 
 			ImGui::EndGroup();
 		}
+
+		ImGui::PopID();
+	}
+	void runtime::draw_overlay_menu_log()
+	{
+		ImGui::PushID("Log");
+
+		static ImGuiTextFilter filter; // TODO: Better make this a member of the runtime class, in case there are multiple instances.
+		filter.Draw();
+
+		std::vector<std::string> lines;
+		for (auto &line : reshade::log::lines)
+			if (filter.PassFilter(line.c_str()))
+				lines.push_back(line);
+
+		ImGui::SameLine(0, 20);
+		ImGui::Checkbox("Word Wrap", &_log_wordwrap);
+
+		ImGuiListClipper clipper(static_cast<int>(lines.size()), ImGui::GetTextLineHeightWithSpacing());
+
+		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+		{
+			ImVec4 textcol(1, 1, 1, 1);
+
+			if (lines[i].find("ERROR |") != std::string::npos)
+				textcol = ImVec4(1, 0, 0, 1);
+			else if (lines[i].find("WARN |") != std::string::npos)
+				textcol = ImVec4(1, 1, 0, 1);
+			else if (lines[i].find("DEBUG |") != std::string::npos)
+				textcol = ImColor(100, 100, 255);
+
+			ImGui::PushStyleColor(ImGuiCol_Text, textcol);
+			if (_log_wordwrap) ImGui::PushTextWrapPos();
+
+			ImGui::TextUnformatted(lines[i].c_str());
+
+			if (_log_wordwrap) ImGui::PopTextWrapPos();
+			ImGui::PopStyleColor();
+		}
+
+		clipper.End();
 
 		ImGui::PopID();
 	}

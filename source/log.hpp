@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <utf8/unchecked.h>
 #include "filesystem.hpp"
 
@@ -14,17 +15,21 @@
 #define LOG_INFO() reshade::log::message(reshade::log::level::info)
 #define LOG_ERROR() reshade::log::message(reshade::log::level::error)
 #define LOG_WARNING() reshade::log::message(reshade::log::level::warning)
+#define LOG_DEBUG() reshade::log::message(reshade::log::level::debug)
 
 namespace reshade::log
 {
 	enum class level
 	{
-		info,
-		error,
-		warning,
+		info = 4,
+		error = 1,
+		warning = 2,
+		debug = 3,
 	};
 
 	extern std::ofstream stream;
+	extern std::ostringstream linestream;
+	extern std::vector<std::string> lines;
 
 	struct message
 	{
@@ -35,6 +40,7 @@ namespace reshade::log
 		inline message &operator<<(const T &value)
 		{
 			stream << value;
+			linestream << value;
 			return *this;
 		}
 
@@ -51,6 +57,7 @@ namespace reshade::log
 		inline message &operator<<(const char *message)
 		{
 			stream << message;
+			linestream << message;
 			return *this;
 		}
 		inline message &operator<<(const wchar_t *message)
