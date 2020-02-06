@@ -92,7 +92,14 @@ namespace reshade
 		else
 			imgui_io.Fonts->AddFontDefault();
 
-		load_configuration();
+		load_config();
+
+		subscribe_to_menu("Home", [this]() { draw_overlay_menu_home(); });
+		subscribe_to_menu("Settings", [this]() { draw_overlay_menu_settings(); });
+		subscribe_to_menu("Gw2 Settings", [this]() { draw_overlay_menu_gw2(); });
+		subscribe_to_menu("Statistics", [this]() { draw_overlay_menu_statistics(); });
+		subscribe_to_menu("Log", [this]() { draw_overlay_menu_log(); });
+		subscribe_to_menu("About", [this]() { draw_overlay_menu_about(); });
 	}
 	runtime::~runtime()
 	{
@@ -199,7 +206,7 @@ namespace reshade
 		if (imgui_io.KeyCtrl)
 		{
 			// Change global font scale if user presses the control key and moves the mouse wheel
-			imgui_io.FontGlobalScale = ImClamp(imgui_io.FontGlobalScale + imgui_io.MouseWheel * 0.10f, 1.0f, 2.50f);
+			imgui_io.FontGlobalScale = ImClamp(imgui_io.FontGlobalScale + imgui_io.MouseWheel * 0.10f, 0.2f, 2.50f);
 		}
 
 		ImGui::NewFrame();
@@ -753,7 +760,7 @@ namespace reshade
 		}
 	}
 
-	void runtime::load_configuration()
+	void runtime::load_config()
 	{
 		const ini_file config(_configuration_path);
 
@@ -788,9 +795,6 @@ namespace reshade
 		snprintf(_c_inj_vs, 32, "%#llx", _inj_vs);
 
 		_imgui_context->IO.IniFilename = _save_imgui_window_state ? "ReShadeGUI.ini" : nullptr;
-
-		config.get("BUFFER_DETECTION", "DepthBufferRetrievalMode", _depth_buffer_before_clear);
-		config.get("BUFFER_DETECTION", "DepthBufferTextureFormat", _depth_buffer_texture_format);
 
 		config.get("STYLE", "Alpha", _imgui_context->Style.Alpha);
 		config.get("STYLE", "ColBackground", _imgui_col_background);
@@ -873,8 +877,13 @@ namespace reshade
 		to_absolute(_effect_search_paths);
 		to_absolute(_texture_search_paths);
 #endif
+
+		for (auto &function : _load_config_callables)
+		{
+			function(config);
+		}
 	}
-	void runtime::save_configuration() const
+	void runtime::save_config() const
 	{
 		ini_file config(_configuration_path);
 
@@ -905,15 +914,17 @@ namespace reshade
 		config.set("GENERAL", "InjVS", _inj_vs);
 		config.set("GENERAL", "AutoPreset", _auto_preset);
 
-		config.set("BUFFER_DETECTION", "DepthBufferRetrievalMode", _depth_buffer_before_clear);
-		config.set("BUFFER_DETECTION", "DepthBufferTextureFormat", _depth_buffer_texture_format);
-
 		config.set("STYLE", "Alpha", _imgui_context->Style.Alpha);
 		config.set("STYLE", "ColBackground", _imgui_col_background);
 		config.set("STYLE", "ColItemBackground", _imgui_col_item_background);
 		config.set("STYLE", "ColActive", _imgui_col_active);
 		config.set("STYLE", "ColText", _imgui_col_text);
 		config.set("STYLE", "ColFPSText", _imgui_col_text_fps);
+
+		for (auto &function : _save_config_callables)
+		{
+			function(config);
+		}
 	}
 
 	void runtime::load_preset(const filesystem::path &path)
@@ -1196,8 +1207,8 @@ namespace reshade
 		{
 			if (!show_splash)
 			{
-				ImGui::SetNextWindowPos(ImVec2(_width - 80.f, 0));
-				ImGui::SetNextWindowSize(ImVec2(80, 100));
+				ImGui::SetNextWindowPos(ImVec2(_width - 200.0f, 0));
+				ImGui::SetNextWindowSize(ImVec2(200.0f, 200.0f));
 				ImGui::PushFont(_imgui_context->IO.Fonts->Fonts[1]);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(_imgui_col_text_fps[0], _imgui_col_text_fps[1], _imgui_col_text_fps[2], 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4());
@@ -1210,16 +1221,26 @@ namespace reshade
 					ImGuiWindowFlags_NoInputs |
 					ImGuiWindowFlags_NoFocusOnAppearing);
 
+				char temp[512];
+
 				if (_show_clock)
 				{
 					const int hour = _date[3] / 3600;
 					const int minute = (_date[3] - hour * 3600) / 60;
-					ImGui::Text(" %02u%s%02u", hour, _date[3] % 2 ? ":" : " ", minute);
+
+					ImFormatString(temp, sizeof(temp), " %02u%s%02u", hour, _date[3] % 2 ? ":" : " ", minute);
+					ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+					ImGui::TextUnformatted(temp);
 				}
 				if (_show_framerate)
 				{
-					ImGui::Text("%.0f fps", _imgui_context->IO.Framerate);
-					ImGui::Text("%*lld ms", 3, std::chrono::duration_cast<std::chrono::milliseconds>(_last_frame_duration).count());
+					ImFormatString(temp, sizeof(temp), "%.0f fps", _imgui_context->IO.Framerate);
+					ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+					ImGui::TextUnformatted(temp);
+
+					ImFormatString(temp, sizeof(temp), "%*lld ms", 3, std::chrono::duration_cast<std::chrono::milliseconds>(_last_frame_duration).count());
+					ImGui::SetCursorPosX(ImGui::GetWindowContentRegionWidth() - ImGui::CalcTextSize(temp).x);
+					ImGui::TextUnformatted(temp);
 				}
 
 				ImGui::End();
@@ -1237,7 +1258,7 @@ namespace reshade
 				}
 
 				ImGui::SetNextWindowPos(ImVec2(_width * 0.5f, _height * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-				ImGui::SetNextWindowSize(ImVec2(710, 650), ImGuiCond_FirstUseEver);
+				ImGui::SetNextWindowSize(ImVec2(730, 650), ImGuiCond_FirstUseEver);
 				ImGui::Begin("Gw2 Hook " VERSION_STRING_FILE "###Main", &_show_menu,
 					ImGuiWindowFlags_MenuBar |
 					ImGuiWindowFlags_NoCollapse);
@@ -1262,11 +1283,11 @@ namespace reshade
 		{
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImGui::GetStyle().ItemSpacing * 2);
 
-			const char *const menu_items[] = { "Home", "Gw2 Settings", "Settings", "Statistics", "Log", "About" };
-
-			for (int i = 0; i < _countof(menu_items); i++)
+			for (size_t i = 0; i < _menu_callables.size(); ++i)
 			{
-				if (ImGui::Selectable(menu_items[i], _menu_index == i, 0, ImVec2(ImGui::CalcTextSize(menu_items[i]).x, 0)))
+				const std::string &label = _menu_callables[i].first;
+
+				if (ImGui::Selectable(label.c_str(), _menu_index == i, 0, ImVec2(ImGui::CalcTextSize(label.c_str()).x, 0)))
 				{
 					_menu_index = i;
 				}
@@ -1278,27 +1299,7 @@ namespace reshade
 			ImGui::EndMenuBar();
 		}
 
-		switch (_menu_index)
-		{
-		case 0:
-			draw_overlay_menu_home();
-			break;
-		case 1:
-			draw_overlay_menu_gw2();
-			break;
-		case 2:
-			draw_overlay_menu_settings();
-			break;
-		case 3:
-			draw_overlay_menu_statistics();
-			break;
-		case 4:
-			draw_overlay_menu_log();
-			break;
-		case 5:
-			draw_overlay_menu_about();
-			break;
-		}
+		_menu_callables[_menu_index].second();
 	}
 	void runtime::draw_overlay_menu_home()
 	{
@@ -1344,7 +1345,7 @@ namespace reshade
 			//auto preset
 			if (ImGui::Combo("##presets", &_current_preset, get_preset_file, this, static_cast<int>(_preset_files.size())))
 			{
-				save_configuration();
+				save_config();
 
 				if (_performance_mode)
 				{
@@ -1381,7 +1382,7 @@ namespace reshade
 						_current_preset = static_cast<int>(_preset_files.size()) - 1;
 
 						load_preset(path);
-						save_configuration();
+						save_config();
 
 						ImGui::CloseCurrentPopup();
 
@@ -1421,7 +1422,7 @@ namespace reshade
 							load_preset(_preset_files[_current_preset]);
 						}
 
-						save_configuration();
+						save_config();
 
 						ImGui::CloseCurrentPopup();
 					}
@@ -1565,7 +1566,7 @@ namespace reshade
 			{
 				_tutorial_index++;
 
-				save_configuration();
+				save_config();
 			}
 		}
 
@@ -1628,7 +1629,7 @@ namespace reshade
 					_menu_key_data[1] = _input->is_key_down(0x11);
 					_menu_key_data[2] = _input->is_key_down(0x10);
 
-					save_configuration();
+					save_config();
 				}
 			}
 			else if (ImGui::IsItemHovered())
@@ -1652,7 +1653,7 @@ namespace reshade
 					_effects_key_data[1] = _input->is_key_down(0x11);
 					_effects_key_data[2] = _input->is_key_down(0x10);
 
-					save_configuration();
+					save_config();
 				}
 			}
 			else if (ImGui::IsItemHovered())
@@ -1666,13 +1667,13 @@ namespace reshade
 			{
 				_performance_mode = usage_mode_index == 0;
 
-				save_configuration();
+				save_config();
 				reload();
 			}
 
 			if (ImGui::Combo("Input Processing", &_input_processing_mode, "Pass on all input\0Block input when cursor is on overlay\0Block all input when overlay is visible\0"))
 			{
-				save_configuration();
+				save_config();
 			}
 
 			copy_search_paths_to_edit_buffer(_effect_search_paths);
@@ -1682,7 +1683,7 @@ namespace reshade
 				const auto effect_search_paths = split(edit_buffer, '\n');
 				_effect_search_paths.assign(effect_search_paths.begin(), effect_search_paths.end());
 
-				save_configuration();
+				save_config();
 			}
 
 			copy_search_paths_to_edit_buffer(_texture_search_paths);
@@ -1692,7 +1693,7 @@ namespace reshade
 				const auto texture_search_paths = split(edit_buffer, '\n');
 				_texture_search_paths.assign(texture_search_paths.begin(), texture_search_paths.end());
 
-				save_configuration();
+				save_config();
 			}
 
 			copy_vector_to_edit_buffer(_preprocessor_definitions);
@@ -1701,7 +1702,7 @@ namespace reshade
 			{
 				_preprocessor_definitions = split(edit_buffer, '\n');
 
-				save_configuration();
+				save_config();
 			}
 
 			if (ImGui::Button("Restart Tutorial", ImVec2(ImGui::CalcItemWidth(), 0)))
@@ -1732,7 +1733,7 @@ namespace reshade
 					_screenshot_key_data[1] = _input->is_key_down(0x11);
 					_screenshot_key_data[2] = _input->is_key_down(0x10);
 
-					save_configuration();
+					save_config();
 				}
 			}
 			else if (ImGui::IsItemHovered())
@@ -1746,12 +1747,12 @@ namespace reshade
 			{
 				_screenshot_path = edit_buffer;
 
-				save_configuration();
+				save_config();
 			}
 
 			if (ImGui::Combo("Screenshot Format", &_screenshot_format, "Bitmap (*.bmp)\0Portable Network Graphics (*.png)\0"))
 			{
-				save_configuration();
+				save_config();
 			}
 		}
 
@@ -1771,30 +1772,9 @@ namespace reshade
 
 			if (modified)
 			{
-				save_configuration();
-				// Style is applied in "load_configuration".
-				load_configuration();
-			}
-		}
-
-		const bool is_d3d11 = _renderer_id >= 0xb000 && _renderer_id < 0xc000;;
-
-		if (is_d3d11 && ImGui::CollapsingHeader("Buffer Detection", ImGuiTreeNodeFlags_DefaultOpen))
-		{
-			assert(_menu_key_data[0] < 256);
-
-			bool modified = false;
-			modified |= ImGui::Checkbox("Copy Depth Before Clearing", &_depth_buffer_before_clear);
-			modified |= ImGui::Combo("Depth Texture Format", &_depth_buffer_texture_format, "All\0D16\0D32F\0D24S8\0D32FS8\0");
-
-			if (modified)
-			{
-				save_configuration();
-			}
-
-			if (ImGui::Button("Show Debug Window", ImVec2(ImGui::CalcItemWidth(), 0)))
-			{
-				_depth_buffer_debug = true;
+				save_config();
+				// Style is applied in "load_config()".
+				load_config();
 			}
 		}
 
@@ -1805,16 +1785,16 @@ namespace reshade
 		if (ImGui::CollapsingHeader("General", ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			if (ImGui::Combo("Auto preset selection", &_auto_preset, "Yes\0No\0")) {
-				save_configuration();
+				save_config();
 			}
 
 			
 			if (ImGui::DragFloat("Fog amount", &_fog_amount, 0.005f, 0.0f, 1.0f, "%.2f")) {
-				save_configuration();
+				save_config();
 			}
 
 			if (ImGui::Combo("Skip UI", &_skip_ui, "Yes\0No\0")) {
-				save_configuration();
+				save_config();
 			}
 
 			ImGui::Spacing();
@@ -1832,7 +1812,7 @@ namespace reshade
 				catch (...) {
 					_inj_ps = -1;
 				}
-				save_configuration();
+				save_config();
 			}
 
 			if (ImGui::InputText("Injection VS", _c_inj_vs, sizeof(_c_inj_ps), ImGuiInputTextFlags_EnterReturnsTrue))
@@ -1843,11 +1823,11 @@ namespace reshade
 				catch (...) {
 					_inj_vs = -1;
 				}
-				save_configuration();
+				save_config();
 			}
 
 			if (ImGui::Combo("Allow Gw2 bloom", &_no_bloom, "Yes\0No\0")) {
-				save_configuration();
+				save_config();
 			}
 
 			ImGui::Spacing();
@@ -2063,7 +2043,7 @@ namespace reshade
 
 			if (lines[i].find("ERROR |") != std::string::npos)
 				textcol = ImVec4(1, 0, 0, 1);
-			else if (lines[i].find("WARN |") != std::string::npos)
+			else if (lines[i].find("WARN  |") != std::string::npos)
 				textcol = ImVec4(1, 1, 0, 1);
 			else if (lines[i].find("DEBUG |") != std::string::npos)
 				textcol = ImColor(100, 100, 255);
@@ -2346,7 +2326,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 				_tutorial_index++;
 
-				save_configuration();
+				save_config();
 			}
 
 			ImGui::EndPopup();
