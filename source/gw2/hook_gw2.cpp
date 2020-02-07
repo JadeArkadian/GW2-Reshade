@@ -1,5 +1,6 @@
 #include "d3d9/d3d9_device.hpp"
 #include "d3d9/d3d9_swapchain.hpp"
+#include "d3d9/runtime_d3d9.hpp"
 #include "ini_file.hpp"
 #include "hook_gw2.hpp"
 

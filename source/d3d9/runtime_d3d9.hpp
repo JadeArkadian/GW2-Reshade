@@ -5,18 +5,14 @@
 
 #pragma once
 
-#include <d3d9.h>
 #include "runtime.hpp"
+#include "effect_codegen.hpp"
+#include "effect_expression.hpp"
 #include "com_ptr.hpp"
+#include <d3d9.h>
 
 namespace reshade::d3d9
 {
-	struct d3d9_sampler
-	{
-		DWORD states[12];
-		struct d3d9_tex_data *texture;
-	};
-
 	struct d3d9_tex_data : base_object
 	{
 		com_ptr<IDirect3DTexture9> texture;
@@ -26,17 +22,25 @@ namespace reshade::d3d9
 	{
 		com_ptr<IDirect3DVertexShader9> vertex_shader;
 		com_ptr<IDirect3DPixelShader9> pixel_shader;
-		d3d9_sampler samplers[16] = { };
-		DWORD sampler_count = 0;
 		com_ptr<IDirect3DStateBlock9> stateblock;
 		bool clear_render_targets = false;
-		IDirect3DSurface9 *render_targets[8] = { };
+		IDirect3DSurface9 *render_targets[8] = {};
+		IDirect3DTexture9 *sampler_textures[16] = {};
+	};
+	struct d3d9_technique_data : base_object
+	{
+		DWORD num_samplers = 0;
+		DWORD sampler_states[16][12] = {};
+		IDirect3DTexture9 *sampler_textures[16] = {};
+		DWORD constant_register_count = 0;
+		size_t uniform_storage_offset = 0;
 	};
 
-	class d3d9_runtime : public runtime
+	class runtime_d3d9 : public runtime
 	{
 	public:
-		d3d9_runtime(IDirect3DDevice9 *device, IDirect3DSwapChain9 *swapchain);
+		runtime_d3d9(IDirect3DDevice9 *device, IDirect3DSwapChain9 *swapchain);
+		~runtime_d3d9();
 
 		bool on_init(const D3DPRESENT_PARAMETERS &pp);
 		void on_reset();
@@ -78,6 +82,11 @@ namespace reshade::d3d9
 
 		void draw_debug_menu();
 
+		void add_texture(const reshadefx::texture_info &info);
+		void add_sampler(const reshadefx::sampler_info &info, d3d9_technique_data &effect);
+		void add_uniform(const reshadefx::uniform_info &info, size_t storage_base_offset);
+		void add_technique(const reshadefx::technique_info &info, const d3d9_technique_data &effect);
+
 		void detect_depth_source();
 		bool create_depthstencil_replacement(IDirect3DSurface9 *depthstencil);
 
@@ -100,5 +109,9 @@ namespace reshade::d3d9
 		com_ptr<IDirect3DVertexBuffer9> _imgui_vertex_buffer;
 		com_ptr<IDirect3DIndexBuffer9> _imgui_index_buffer;
 		int _imgui_vertex_buffer_size = 0, _imgui_index_buffer_size = 0;
+
+		HMODULE _d3d_compiler = nullptr;
+		std::unordered_map<std::string, com_ptr<IDirect3DPixelShader9>> _ps_entry_points;
+		std::unordered_map<std::string, com_ptr<IDirect3DVertexShader9>> _vs_entry_points;
 	};
 }

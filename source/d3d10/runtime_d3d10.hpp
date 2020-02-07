@@ -5,10 +5,11 @@
 
 #pragma once
 
-#include <d3d10_1.h>
 #include "runtime.hpp"
-#include "d3d10_stateblock.hpp"
+#include "state_block.hpp"
 #include "draw_call_tracker.hpp"
+#include "effect_codegen.hpp"
+#include "effect_expression.hpp"
 
 namespace reshade::d3d10
 {
@@ -38,12 +39,16 @@ namespace reshade::d3d10
 		com_ptr<ID3D10Query> timestamp_query_beg;
 		com_ptr<ID3D10Query> timestamp_query_end;
 		std::vector<com_ptr<ID3D10SamplerState>> sampler_states;
+		std::vector<com_ptr<ID3D10ShaderResourceView>> texture_bindings;
+		ptrdiff_t uniform_storage_offset = 0;
+		ptrdiff_t uniform_storage_index = -1;
 	};
 
-	class d3d10_runtime : public runtime
+	class runtime_d3d10 : public runtime
 	{
 	public:
-		d3d10_runtime(ID3D10Device1 *device, IDXGISwapChain *swapchain);
+		runtime_d3d10(ID3D10Device1 *device, IDXGISwapChain *swapchain);
+		~runtime_d3d10();
 
 		bool on_init(const DXGI_SWAP_CHAIN_DESC &desc);
 		void on_reset();
@@ -87,6 +92,11 @@ namespace reshade::d3d10
 		bool init_imgui_resources();
 		bool init_imgui_font_atlas();
 
+		void add_texture(const reshadefx::texture_info &info);
+		void add_sampler(const reshadefx::sampler_info &info, d3d10_technique_data &effect);
+		void add_uniform(const reshadefx::uniform_info &info, size_t storage_base_offset);
+		void add_technique(const reshadefx::technique_info &info, const d3d10_technique_data &effect);
+
 		void draw_debug_menu();
 
 #if RESHADE_DX10_CAPTURE_DEPTH_BUFFERS
@@ -107,7 +117,7 @@ namespace reshade::d3d10
 
 		bool _is_multisampling_enabled = false;
 		DXGI_FORMAT _backbuffer_format = DXGI_FORMAT_UNKNOWN;
-		d3d10_stateblock _stateblock;
+		state_block _stateblock;
 		com_ptr<ID3D10Texture2D> _backbuffer, _backbuffer_resolved;
 		com_ptr<ID3D10DepthStencilView> _depthstencil, _depthstencil_replacement;
 		ID3D10DepthStencilView *_best_depth_stencil_overwrite = nullptr;
@@ -129,5 +139,9 @@ namespace reshade::d3d10
 		com_ptr<ID3D10DepthStencilState> _imgui_depthstencil_state;
 		int _imgui_vertex_buffer_size = 0, _imgui_index_buffer_size = 0;
 		draw_call_tracker _current_tracker;
+
+		HMODULE _d3d_compiler = nullptr;
+		std::unordered_map<std::string, com_ptr<ID3D10PixelShader>> _ps_entry_points;
+		std::unordered_map<std::string, com_ptr<ID3D10VertexShader>> _vs_entry_points;
 	};
 }
