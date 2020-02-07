@@ -1,11 +1,9 @@
-# GuildFX
+![](logo.png)
 > GuildFX is a custom version for [Guild Wars 2](https://www.guildwars2.com/) of the well known postprocessing injector [ReShade](https://reshade.me).
 
 [![NPM Version][npm-image]][npm-url]
 [![Build Status][travis-image]][travis-url]
 [![Downloads Stats][npm-downloads]][npm-url]
-
-![](logo.png)
 
 
 ## Features
