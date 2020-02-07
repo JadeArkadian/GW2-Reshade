@@ -22,7 +22,7 @@ namespace reshade
 }
 namespace reshadefx
 {
-	class syntax_tree;
+	struct module;
 }
 
 #pragma endregion
@@ -201,10 +201,9 @@ namespace reshade
 		/// <summary>
 		/// Compile effect from the specified abstract syntax tree and initialize textures, constants and techniques.
 		/// </summary>
-		/// <param name="ast">The abstract syntax tree of the effect to compile.</param>
-		/// <param name="pragmas">A list of additional commands to the compiler.</param>
+		/// <param name="module">The effect module to compile.</param>
 		/// <param name="errors">A reference to a buffer to store errors which occur during compilation.</param>
-		virtual bool load_effect(const reshadefx::syntax_tree &ast, std::string &errors) = 0;
+		virtual bool load_effect(const reshadefx::module &module, std::string &errors) = 0;
 
 		/// <summary>
 		/// Loads image files and updates all textures with image data.
@@ -225,6 +224,11 @@ namespace reshade
 		/// Save user configuration to disk.
 		/// </summary>
 		void save_config() const;
+		/// <summary>
+		/// Save user configuration to disk.
+		/// </summary>
+		/// <param name="path">Output configuration path.</param>
+		void save_config(const filesystem::path &path) const;
 
 		/// <summary>
 		/// Render all passes in a technique.
@@ -253,6 +257,7 @@ namespace reshade
 
 		void load_current_preset();
 		void save_preset(const filesystem::path &path) const;
+		void save_preset(const filesystem::path &path, const filesystem::path &save_path) const;
 		void save_current_preset() const;
 		void save_screenshot() const;
 
@@ -301,6 +306,8 @@ namespace reshade
 		bool _show_framerate = false;
 		bool _effects_enabled = true;
 		bool _is_fast_loading = false;
+		bool _screenshot_include_preset = false;
+		bool _screenshot_include_configuration = false;
 		bool _no_font_scaling = false;
 		bool _no_reload_on_init = false;
 		bool _save_imgui_window_state = false;
@@ -309,11 +316,11 @@ namespace reshade
 		bool _toggle_key_setting_active = false;
 		bool _log_wordwrap = false;
 		unsigned char _switched_menu = 0;
-		float _imgui_col_background[3] = { 0.275f, 0.275f, 0.275f };
-		float _imgui_col_item_background[3] = { 0.447f, 0.447f, 0.447f };
-		float _imgui_col_active[3] = { 0.2f, 0.2f, 1.0f };
-		float _imgui_col_text[3] = { 0.8f, 0.9f, 0.9f };
-		float _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.0f };
+		float _imgui_col_background[3] = { 0.117647f, 0.117647f, 0.117647f };
+		float _imgui_col_item_background[3] = { 0.156863f, 0.156863f, 0.156863f };
+		float _imgui_col_active[3] = { 0.392157f, 0.588235f, 0.941176f };
+		float _imgui_col_text[3] = { 0.862745f, 0.862745f, 0.862745f };
+		float _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.784314f };
 		float _variable_editor_height = 0.0f;
 		unsigned int _tutorial_index = 0;
 		unsigned int _effects_expanded_state = 2;

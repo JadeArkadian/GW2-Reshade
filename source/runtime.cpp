@@ -475,6 +475,9 @@ namespace reshade
 
 		_effect_files.clear();
 
+		// Clear log on reload so that errors disappear from the splash screen
+		reshade::log::lines.clear();
+
 		std::vector<std::string> fastloading_filenames;
 
 		if (_current_preset >= 0 && _performance_mode && !_show_menu)
@@ -579,53 +582,24 @@ namespace reshade
 			return;
 		}
 
-		reshadefx::syntax_tree ast;
-		reshadefx::parser parser(ast);
+		reshadefx::parser parser(reshadefx::codegen_backend::spirv);
 
-		if (!parser.run(pp.current_output()))
+		if (!parser.parse(pp.current_output()))
 		{
 			LOG(ERROR) << "Failed to compile " << path << ":\n" << parser.errors();
 			return;
 		}
 
-		if (_performance_mode && _current_preset >= 0)
-		{
-			ini_file preset(_preset_files[_current_preset]);
+		// TODO: Performance mode?
 
-			for (auto variable : ast.variables)
-			{
-				if (!variable->type.has_qualifier(reshadefx::nodes::type_node::qualifier_uniform) ||
-					variable->initializer_expression == nullptr ||
-					variable->initializer_expression->id != reshadefx::nodeid::literal_expression ||
-					variable->annotation_list.count("source"))
-				{
-					continue;
-				}
+		reshadefx::module module;
+		parser.write_result(module);
 
-				const auto initializer = static_cast<reshadefx::nodes::literal_expression_node *>(variable->initializer_expression);
-
-				switch (initializer->type.basetype)
-				{
-				case reshadefx::nodes::type_node::datatype_int:
-					preset.get(path.filename().string(), variable->name, initializer->value_int);
-					break;
-				case reshadefx::nodes::type_node::datatype_bool:
-				case reshadefx::nodes::type_node::datatype_uint:
-					preset.get(path.filename().string(), variable->name, initializer->value_uint);
-					break;
-				case reshadefx::nodes::type_node::datatype_float:
-					preset.get(path.filename().string(), variable->name, initializer->value_float);
-					break;
-				}
-
-				variable->type.qualifiers ^= reshadefx::nodes::type_node::qualifier_uniform;
-				variable->type.qualifiers |= reshadefx::nodes::type_node::qualifier_static | reshadefx::nodes::type_node::qualifier_const;
-			}
-		}
+		std::ofstream("test.spv", std::ios::binary).write((char*)module.spirv.data(), module.spirv.size() * 4);
 
 		std::string errors = parser.errors();
 
-		if (!load_effect(ast, errors))
+		if (!load_effect(std::move(module), errors))
 		{
 			LOG(ERROR) << "Failed to compile " << path << ":\n" << errors;
 			_textures.erase(_textures.begin() + _texture_count, _textures.end());
@@ -757,6 +731,8 @@ namespace reshade
 		config.get("GENERAL", "TutorialProgress", _tutorial_index);
 		config.get("GENERAL", "ScreenshotPath", _screenshot_path);
 		config.get("GENERAL", "ScreenshotFormat", _screenshot_format);
+		config.get("GENERAL", "ScreenshotIncludePreset", _screenshot_include_preset);
+		config.get("GENERAL", "ScreenshotIncludeConfiguration", _screenshot_include_configuration);
 		config.get("GENERAL", "ShowClock", _show_clock);
 		config.get("GENERAL", "ShowFPS", _show_framerate);
 		config.get("GENERAL", "FontGlobalScale", _imgui_context->IO.FontGlobalScale);
@@ -865,7 +841,11 @@ namespace reshade
 	}
 	void runtime::save_config() const
 	{
-		ini_file config(_configuration_path);
+		save_config(_configuration_path);
+	}
+	void runtime::save_config(const filesystem::path &save_path) const
+	{
+		ini_file config(_configuration_path,save_path);
 
 		config.set("INPUT", "KeyMenu", _menu_key_data);
 		config.set("INPUT", "KeyScreenshot", _screenshot_key_data);
@@ -882,6 +862,8 @@ namespace reshade
 		config.set("GENERAL", "TutorialProgress", _tutorial_index);
 		config.set("GENERAL", "ScreenshotPath", _screenshot_path);
 		config.set("GENERAL", "ScreenshotFormat", _screenshot_format);
+		config.set("GENERAL", "ScreenshotIncludePreset", _screenshot_include_preset);
+		config.set("GENERAL", "ScreenshotIncludeConfiguration", _screenshot_include_configuration);
 		config.set("GENERAL", "ShowClock", _show_clock);
 		config.set("GENERAL", "ShowFPS", _show_framerate);
 		config.set("GENERAL", "FontGlobalScale", _imgui_context->IO.FontGlobalScale);
@@ -979,7 +961,11 @@ namespace reshade
 	}
 	void runtime::save_preset(const filesystem::path &path) const
 	{
-		ini_file preset(path);
+		save_preset(path, path);
+	}
+	void runtime::save_preset(const filesystem::path &path, const filesystem::path &save_path) const
+	{
+		ini_file preset(path, save_path);
 
 		preset.set("", "Zone", preset_zone);
 
@@ -1072,8 +1058,8 @@ namespace reshade
 		const int second = _date[3] - hour * 3600 - minute * 60;
 
 		char filename[25];
-		ImFormatString(filename, sizeof(filename), " %.4d-%.2d-%.2d %.2d-%.2d-%.2d%s", _date[0], _date[1], _date[2], hour, minute, second, _screenshot_format == 0 ? ".bmp" : ".png");
-		const auto path = _screenshot_path / (s_target_executable_path.filename_without_extension() + filename);
+		ImFormatString(filename, sizeof(filename), " %.4d-%.2d-%.2d %.2d-%.2d-%.2d", _date[0], _date[1], _date[2], hour, minute, second);
+		const auto path = _screenshot_path / (s_target_executable_path.filename_without_extension() + filename + (_screenshot_format == 0 ? ".bmp" : ".png"));
 
 		LOG(INFO) << "Saving screenshot to " << path << " ...";
 
@@ -1102,6 +1088,20 @@ namespace reshade
 		if (!success)
 		{
 			LOG(ERROR) << "Failed to write screenshot to " << path << "!";
+			return;
+		}
+
+		if (_screenshot_include_preset && _current_preset >= 0)
+		{
+			const auto preset_file = _preset_files[_current_preset];
+			const auto save_preset_path = _screenshot_path / (s_target_executable_path.filename_without_extension() + filename + " " + preset_file.filename_without_extension() + ".ini");
+			save_preset(preset_file, save_preset_path);
+
+			if (_screenshot_include_configuration)
+			{
+				const auto save_configuration_path = _screenshot_path / (s_target_executable_path.filename_without_extension() + filename + ".ini");
+				save_config(save_configuration_path);
+			}
 		}
 	}
 }
