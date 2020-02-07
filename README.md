@@ -1,20 +1,57 @@
-ReShade
-=======
+# GuildFX
+> GuildFX is a custom version for [Guild Wars 2](https://www.guildwars2.com/) of the well known postprocessing injector [ReShade](https://reshade.me).
 
-ReShade is an advanced, fully generic post-processing injector for games and video software. Imagine your favorite game with ambient occlusion, real depth of field effects, color correction and more ... ReShade exposes an automated and generic way to access both frame color and depth information and all the tools to make it happen.
+[![NPM Version][npm-image]][npm-url]
+[![Build Status][travis-image]][travis-url]
+[![Downloads Stats][npm-downloads]][npm-url]
 
-## Building
+![](header.png)
 
-You'll need both Git and Visual Studio 2017 or higher to build ReShade. Latter is required since the project makes use of some C++14 and C++17 features. Additionally a Python 2.7.9 or later (Python 3 is supported as well) installation is necessary for the `gl3w` dependency to build.
 
-1. Clone this repository including all Git submodules
-2. Open the Visual Studio solution
-3. Select either the "32-bit" or "64-bit" target platform and build the solution (this will build ReShade and all dependencies)
+## Features
+* A bunch of shaders and generic presets out of the box.
+* Multizone presets! Fine tune your shaders to the mood of each map!
+* d912pxy support: Because you want to lose as few FPS as possible
+* Modify the fog: Adjust the ingame fog...or just remove it.
+* Everything else you expect from ReShade on its current version 😉
 
-## Contributing
+## Installation
 
-Any contributions to the project are welcomed, it's recommended to use GitHub [pull requests](https://help.github.com/articles/using-pull-requests/).
+Launch the game, and login into your account. If GuildFX has been correctly injected into your game, a message should appear.
 
-## License
+## Usage
+Press F8 to diplay the config menu and start tunning your game. It works just like any ReShade.
 
-All the source code is licensed under the conditions of the [BSD 3-clause license](LICENSE.md).
+## Development setup
+
+Describe how to install all development dependencies and how to run an automated test-suite of some kind. Potentially do this for multiple platforms.
+
+```sh
+make install
+npm test
+```
+
+## Release History
+
+* 0.2.1
+    * CHANGE: Update docs (module code remains unchanged)
+		
+## Meta
+
+Your Name – [@YourTwitter](https://twitter.com/dbader_org) – YourEmail@example.com
+
+Distributed under the XYZ license. See ``LICENSE`` for more information.
+
+[https://github.com/yourname/github-link](https://github.com/dbader/)
+
+## Credits
+
+
+
+<!-- Markdown link & img dfn's -->
+[npm-image]: https://img.shields.io/npm/v/datadog-metrics.svg?style=flat-square
+[npm-url]: https://npmjs.org/package/datadog-metrics
+[npm-downloads]: https://img.shields.io/npm/dm/datadog-metrics.svg?style=flat-square
+[travis-image]: https://img.shields.io/travis/dbader/node-datadog-metrics/master.svg?style=flat-square
+[travis-url]: https://travis-ci.org/dbader/node-datadog-metrics
+[wiki]: https://github.com/yourname/yourproject/wiki
