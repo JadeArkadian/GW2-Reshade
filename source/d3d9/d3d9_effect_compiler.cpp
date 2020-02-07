@@ -15,37 +15,6 @@ namespace reshade::d3d9
 {
 	using namespace reshadefx;
 
-	class spirv_compiler : public spirv_cross::CompilerHLSL
-	{
-	public:
-		spirv_compiler(std::vector<uint32_t> spirv_)
-			: CompilerHLSL(std::move(spirv_)) { }
-
-		void remap_vertex_id()
-		{
-			for (auto &id : ids)
-			{
-				if (id.get_type() != spirv_cross::TypeVariable)
-					continue;
-
-				auto &variable = id.get<spirv_cross::SPIRVariable>();
-
-				const unsigned int builtin = get_decoration(variable.self, spv::DecorationBuiltIn);
-
-				// Remap vertex index to TEXCOORD0
-				if (builtin == spv::BuiltInVertexId || builtin == spv::BuiltInVertexIndex)
-				{
-					set_decoration(variable.self, spv::DecorationLocation, 0); // TEXCOORD0
-					unset_decoration(variable.self, spv::DecorationBuiltIn);
-				}
-			}
-		}
-	};
-
-	static inline bool is_pow2(int x)
-	{
-		return ((x > 0) && ((x & (x - 1)) == 0));
-	}
 	static D3DBLEND literal_to_blend_func(unsigned int value)
 	{
 		switch (value)
@@ -137,11 +106,31 @@ namespace reshade::d3d9
 		return D3DFMT_UNKNOWN;
 	}
 
-	d3d9_effect_compiler::d3d9_effect_compiler(d3d9_runtime *runtime, const module &module, std::string &errors, bool skipoptimization) :
+	static void copy_annotations(const std::unordered_map<std::string, std::pair<type, constant>> &source, std::unordered_map<std::string, variant> &target)
+	{
+		for (const auto &annotation : source)
+			switch (annotation.second.first.base)
+			{
+			case type::t_int:
+				target.insert({ annotation.first, variant(annotation.second.second.as_int[0]) });
+				break;
+			case type::t_bool:
+			case type::t_uint:
+				target.insert({ annotation.first, variant(annotation.second.second.as_uint[0]) });
+				break;
+			case type::t_float:
+				target.insert({ annotation.first, variant(annotation.second.second.as_float[0]) });
+				break;
+			case type::t_string:
+				target.insert({ annotation.first, variant(annotation.second.second.string_data) });
+				break;
+			}
+	}
+
+	d3d9_effect_compiler::d3d9_effect_compiler(d3d9_runtime *runtime, const module &module, std::string &errors) :
 		_runtime(runtime),
 		_module(&module),
-		_errors(errors),
-		_skip_shader_optimization(skipoptimization)
+		_errors(errors)
 	{
 	}
 
@@ -159,24 +148,19 @@ namespace reshade::d3d9
 			return false;
 		}
 
-		// TODO try catch
-		spirv_compiler cross(std::move(_module->spirv));
-		cross.remap_vertex_id();
+		// Compile all entry points
+		for (const auto &entry : _module->entry_points)
+		{
+			compile_entry_point(entry.first, entry.second);
+		}
 
-		const auto resources = cross.get_shader_resources();
+		FreeLibrary(_d3dcompiler_module);
 
-		// Parse uniform variables
+		// No need to setup resources if any of the shaders failed to compile
+		if (!_success)
+			return false;
+
 		_uniform_storage_offset = _runtime->get_uniform_value_storage().size();
-
-		//for (const spirv_cross::Resource &ubo : resources.uniform_buffers)
-		//{
-		//	const auto &struct_type = cross.get_type(ubo.base_type_id);
-
-		//	for (uint32_t i = 0; i < struct_type.member_types.size(); ++i)
-		//	{
-		//		visit_uniform(cross, ubo.base_type_id, i);
-		//	}
-		//}
 
 		for (const auto &texture : _module->textures)
 		{
@@ -188,22 +172,12 @@ namespace reshade::d3d9
 		}
 		for (const auto &uniform : _module->uniforms)
 		{
-			visit_uniform(cross, uniform);
+			visit_uniform(uniform);
 		}
-
-		// Compile all entry points
-		for (const spirv_cross::EntryPoint &entry : cross.get_entry_points_and_stages())
-		{
-			compile_entry_point(cross, entry);
-		}
-
-		// Parse technique information
 		for (const auto &technique : _module->techniques)
 		{
 			visit_technique(technique);
 		}
-
-		FreeLibrary(_d3dcompiler_module);
 
 		return _success;
 	}
@@ -235,11 +209,9 @@ namespace reshade::d3d9
 		}
 
 		texture obj;
+		obj.name = texture_info.unique_name;
 		obj.unique_name = texture_info.unique_name;
-
-		for (const auto &annotation : texture_info.annotations)
-			obj.annotations.insert({ annotation.first, variant(annotation.second) });
-
+		copy_annotations(texture_info.annotations, obj.annotations);
 		obj.width = texture_info.width;
 		obj.height = texture_info.height;
 		obj.levels = texture_info.levels;
@@ -332,21 +304,16 @@ namespace reshade::d3d9
 		_sampler_bindings[sampler_info.binding] = std::move(sampler);
 	}
 
-	void d3d9_effect_compiler::visit_uniform(const spirv_cross::CompilerHLSL &cross, const uniform_info &uniform_info)
+	void d3d9_effect_compiler::visit_uniform(const uniform_info &uniform_info)
 	{
-		const auto &struct_type = cross.get_type(uniform_info.struct_type_id);
-
 		uniform obj;
 		obj.name = uniform_info.name;
 		obj.rows = uniform_info.type.rows;
 		obj.columns = uniform_info.type.cols;
 		obj.elements = std::max(1, uniform_info.type.array_length);
-		obj.storage_size = cross.get_declared_struct_member_size(struct_type, uniform_info.member_index);
-		//obj.storage_offset = _uniform_storage_offset + cross.type_struct_member_offset(struct_type, uniform_info.member_index);
-		obj.storage_offset = _uniform_storage_offset + cross.type_struct_member_offset(struct_type, uniform_info.member_index) * 4;
-
-		for (const auto &annotation : uniform_info.annotations)
-			obj.annotations.insert({ annotation.first, variant(annotation.second) });
+		obj.storage_size = uniform_info.size;
+		obj.storage_offset = _uniform_storage_offset + uniform_info.offset * 4;
+		copy_annotations(uniform_info.annotations, obj.annotations);
 
 		obj.basetype = uniform_datatype::floating_point;
 
@@ -364,7 +331,6 @@ namespace reshade::d3d9
 		}
 
 		_constant_register_count += obj.storage_size / 4;
-		//_constant_register_count += (obj.storage_size / 4 + 4 - ((obj.storage_size / 4) % 4)) / 4;
 
 		auto &uniform_storage = _runtime->get_uniform_value_storage();
 
@@ -403,9 +369,7 @@ namespace reshade::d3d9
 	{
 		technique obj;
 		obj.name = technique_info.name;
-
-		for (const auto &annotation : technique_info.annotations)
-			obj.annotations.insert({ annotation.first, variant(annotation.second) });
+		copy_annotations(technique_info.annotations, obj.annotations);
 
 		if (_constant_register_count != 0)
 		{
@@ -420,9 +384,11 @@ namespace reshade::d3d9
 			auto &pass = static_cast<d3d9_pass_data &>(*obj.passes.emplace_back(std::make_unique<d3d9_pass_data>()));
 
 			pass.vertex_shader = vs_entry_points[pass_info.vs_entry_point];
+			assert(pass.vertex_shader != nullptr);
 			pass.pixel_shader = ps_entry_points[pass_info.ps_entry_point];
+			assert(pass.pixel_shader != nullptr);
 
-			pass.sampler_count = std::min(size_t(16), _sampler_bindings.size());
+			pass.sampler_count = std::min<DWORD>(16, DWORD(_sampler_bindings.size()));
 			for (size_t i = 0; i < pass.sampler_count; ++i)
 				pass.samplers[i] = _sampler_bindings[i];
 
@@ -538,43 +504,19 @@ namespace reshade::d3d9
 		_runtime->add_technique(std::move(obj));
 	}
 
-	void d3d9_effect_compiler::compile_entry_point(spirv_cross::CompilerHLSL &cross, const spirv_cross::EntryPoint &entry)
+	void d3d9_effect_compiler::compile_entry_point(const std::string &entry_point, bool is_ps)
 	{
-		std::string hlsl, target;
-
-		// Set shader model version
-		cross.set_hlsl_options({ 30 });
-
-		// Cross compile entry point to HLSL source code
-		cross.set_entry_point(entry.name, entry.execution_model);
-
-		try
-		{
-			hlsl = cross.compile();
-		}
-		catch (const spirv_cross::CompilerError &e)
-		{
-			error(e.what());
-			return;
-		}
-
-		// Figure out the target profile name
-		switch (entry.execution_model)
-		{
-		case spv::ExecutionModelVertex:
-			target = "vs_3_0";
-			break;
-		case spv::ExecutionModelFragment:
-			target = "ps_3_0";
-			break;
-		}
+		std::string hlsl;
+		if (is_ps)
+			hlsl = "#define POSITION VPOS\n";
+		hlsl += _module->hlsl;
 
 		// Compile the generated HLSL source code to DX byte code
 		com_ptr<ID3DBlob> compiled, errors;
 
 		const auto D3DCompile = reinterpret_cast<pD3DCompile>(GetProcAddress(_d3dcompiler_module, "D3DCompile"));
 
-		HRESULT hr = D3DCompile(hlsl.c_str(), hlsl.size(), nullptr, nullptr, nullptr, "main", target.c_str(), 0, 0, &compiled, &errors);
+		HRESULT hr = D3DCompile(hlsl.c_str(), hlsl.size(), nullptr, nullptr, nullptr, entry_point.c_str(), is_ps ? "ps_3_0" : "vs_3_0", 0, 0, &compiled, &errors);
 
 		if (errors != nullptr)
 			_errors.append(static_cast<const char *>(errors->GetBufferPointer()), errors->GetBufferSize() - 1); // Subtracting one to not append the null-terminator as well
@@ -586,15 +528,10 @@ namespace reshade::d3d9
 		}
 
 		// Create runtime shader objects from the compiled DX byte code
-		switch (entry.execution_model)
-		{
-		case spv::ExecutionModelVertex:
-			hr = _runtime->_device->CreateVertexShader(static_cast<const DWORD *>(compiled->GetBufferPointer()), &vs_entry_points[entry.name]);
-			break;
-		case spv::ExecutionModelFragment:
-			hr = _runtime->_device->CreatePixelShader(static_cast<const DWORD *>(compiled->GetBufferPointer()), &ps_entry_points[entry.name]);
-			break;
-		}
+		if (is_ps)
+			hr = _runtime->_device->CreatePixelShader(static_cast<const DWORD *>(compiled->GetBufferPointer()), &ps_entry_points[entry_point]);
+		else
+			hr = _runtime->_device->CreateVertexShader(static_cast<const DWORD *>(compiled->GetBufferPointer()), &vs_entry_points[entry_point]);
 
 		if (FAILED(hr))
 		{

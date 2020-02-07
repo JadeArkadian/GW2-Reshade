@@ -8,20 +8,19 @@
 #include <iomanip>
 #include <sstream>
 #include <assert.h>
+#include <unordered_set>
 
 using namespace reshadefx;
 
-static const char s_matrix_swizzles[16][5] = {
-	"_m00", "_m01", "_m02", "_m03",
-	"_m10", "_m11", "_m12", "_m13",
-	"_m20", "_m21", "_m22", "_m23",
-	"_m30", "_m31", "_m32", "_m33"
-};
+static inline uint32_t align(uint32_t address, uint32_t alignment)
+{
+	return (address % alignment != 0) ? address + alignment - address % alignment : address;
+}
 
-class codegen_hlsl final : public codegen
+class codegen_glsl final : public codegen
 {
 public:
-	codegen_hlsl(unsigned int shader_model, bool debug_info) : _shader_model(shader_model), _debug_info(debug_info)
+	codegen_glsl(bool debug_info) : _debug_info(debug_info)
 	{
 		struct_info cbuffer_type;
 		cbuffer_type.name = "$Globals";
@@ -40,9 +39,9 @@ private:
 	std::unordered_map<id, std::string> _names;
 	std::unordered_map<id, std::string> _blocks;
 	bool _debug_info = false;
-	unsigned int _shader_model = 0;
-	unsigned int _current_cbuffer_size = 0;
+	unsigned int _current_cbuffer_offset = 0;
 	unsigned int _current_sampler_binding = 0;
+	std::unordered_map<id, id> _remapped_sampler_variables;
 	std::unordered_map<id, std::vector<id>> _switch_fallthrough_blocks;
 	std::vector<std::pair<std::string, bool>> _entry_points;
 
@@ -50,21 +49,17 @@ private:
 
 	void write_result(module &s) const override
 	{
-		if (_shader_model >= 40)
-		{
-			s.hlsl += "struct __sampler2D { Texture2D t; SamplerState s; };\n";
+		s.hlsl +=
+			"float hlsl_fmod(float x, float y) { return x - y * trunc(x / y); }\n"
+			" vec2 hlsl_fmod( vec2 x,  vec2 y) { return x - y * trunc(x / y); }\n"
+			" vec3 hlsl_fmod( vec3 x,  vec3 y) { return x - y * trunc(x / y); }\n"
+			" vec4 hlsl_fmod( vec4 x,  vec4 y) { return x - y * trunc(x / y); }\n"
+			" mat2 hlsl_fmod( mat2 x,  mat2 y) { return x - matrixCompMult(y, mat2(trunc(x[0] / y[0]), trunc(x[1] / y[1]))); }\n"
+			" mat3 hlsl_fmod( mat3 x,  mat3 y) { return x - matrixCompMult(y, mat3(trunc(x[0] / y[0]), trunc(x[1] / y[1]), trunc(x[2] / y[2]))); }\n"
+			" mat4 hlsl_fmod( mat4 x,  mat4 y) { return x - matrixCompMult(y, mat4(trunc(x[0] / y[0]), trunc(x[1] / y[1]), trunc(x[2] / y[2]), trunc(x[3] / y[3]))); }\n";
 
-			if (_blocks.count(_cbuffer_type_id))
-				s.hlsl += "cbuffer _Globals {\n" + _blocks.at(_cbuffer_type_id) + "};\n";
-		}
-		else
-		{
-			s.hlsl += "struct __sampler2D { sampler2D s; float2 pixelsize; };\nuniform float2 __TEXEL_SIZE__ : register(c255);\n";
-
-			if (_blocks.count(_cbuffer_type_id))
-				s.hlsl += _blocks.at(_cbuffer_type_id);
-		}
-
+		if (_blocks.count(_cbuffer_type_id))
+			s.hlsl += "layout(std140, binding = 0) uniform _Globals {\n" + _blocks.at(_cbuffer_type_id) + "};\n";
 		s.hlsl += _blocks.at(0);
 
 		s.samplers = _samplers;
@@ -87,13 +82,13 @@ private:
 		if (is_param)
 		{
 			if (type.has(type::q_linear))
-				s += "linear ";
+				s += "smooth ";
 			if (type.has(type::q_noperspective))
 				s += "noperspective ";
 			if (type.has(type::q_centroid))
 				s += "centroid ";
 			if (type.has(type::q_nointerpolation))
-				s += "nointerpolation ";
+				s += "flat ";
 
 			if (type.has(type::q_inout))
 				s += "inout ";
@@ -109,31 +104,46 @@ private:
 			s += "void";
 			break;
 		case type::t_bool:
-			s += "bool";
+			if (type.cols > 1)
+				s += "mat" + std::to_string(type.rows) + 'x' + std::to_string(type.cols);
+			else if (type.rows > 1)
+				s += "bvec" + std::to_string(type.rows);
+			else
+				s += "bool";
 			break;
 		case type::t_int:
-			s += "int";
+			if (type.cols > 1)
+				s += "mat" + std::to_string(type.rows) + 'x' + std::to_string(type.cols);
+			else if (type.rows > 1)
+				s += "ivec" + std::to_string(type.rows);
+			else
+				s += "int";
 			break;
 		case type::t_uint:
-			s += "uint";
+			if (type.cols > 1)
+				s += "mat" + std::to_string(type.rows) + 'x' + std::to_string(type.cols);
+			else if (type.rows > 1)
+				s += "uvec" + std::to_string(type.rows);
+			else
+				s += "uint";
 			break;
 		case type::t_float:
-			s += "float";
+			if (type.cols > 1)
+				s += "mat" + std::to_string(type.rows) + 'x' + std::to_string(type.cols);
+			else if (type.rows > 1)
+				s += "vec" + std::to_string(type.rows);
+			else
+				s += "float";
 			break;
 		case type::t_struct:
 			s += id_to_name(type.definition);
 			break;
 		case type::t_sampler:
-			s += "__sampler2D";
+			s += "sampler2D";
 			break;
 		default:
 			assert(false);
 		}
-
-		if (type.rows > 1)
-			s += std::to_string(type.rows);
-		if (type.cols > 1)
-			s += 'x' + std::to_string(type.cols);
 
 		return s;
 	}
@@ -148,7 +158,7 @@ private:
 			struct type elem_type = type;
 			elem_type.array_length = 0;
 
-			s += "{ ";
+			s += write_type(elem_type, false, false) + "[](";
 
 			for (int i = 0; i < type.array_length; ++i)
 			{
@@ -158,19 +168,18 @@ private:
 					s += ", ";
 			}
 
-			s += " }";
-
-			return s;
-		}
-		if (type.is_struct())
-		{
-			s += '(' + id_to_name(type.definition) + ")0";
+			s += ')';
 
 			return s;
 		}
 
 		if (!type.is_scalar())
-			s += write_type(type, false, false);
+		{
+			if (type.is_matrix())
+				s += "transpose";
+
+			s += '(' + write_type(type, false, false);
+		}
 
 		s += '(';
 
@@ -185,7 +194,7 @@ private:
 				s += std::to_string(data.as_int[i]);
 				break;
 			case type::t_uint:
-				s += std::to_string(data.as_uint[i]);
+				s += std::to_string(data.as_uint[i]) + 'u';
 				break;
 			case type::t_float: {
 				std::stringstream ss;
@@ -198,6 +207,11 @@ private:
 				s += ", ";
 		}
 
+		if (!type.is_scalar())
+		{
+			s += ')';
+		}
+
 		s += ')';
 
 		return s;
@@ -207,44 +221,43 @@ private:
 		if (loc.source.empty() || !_debug_info)
 			return std::string();
 
-		return "#line " + std::to_string(loc.line) + " \"" + loc.source + "\"\n";
-	}
-
-	std::string convert_semantic(const std::string &semantic) const
-	{
-		if (_shader_model < 40)
-		{
-			if (semantic == "SV_VERTEXID" || semantic == "VERTEXID")
-				return "TEXCOORD0 /* VERTEXID */";
-			else if (semantic == "SV_POSITION")
-				return "POSITION";
-			else if (semantic.compare(0, 9, "SV_TARGET") == 0)
-				return "COLOR" + semantic.substr(9);
-			else if (semantic == "SV_DEPTH")
-				return "DEPTH";
-		}
-		else
-		{
-			if (semantic == "VERTEXID")
-				return "SV_VERTEXID";
-			else if (semantic == "POSITION" || semantic == "VPOS")
-				return "SV_POSITION";
-			else if (semantic.compare(0, 5, "COLOR") == 0)
-				return "SV_TARGET" + semantic.substr(5);
-			else if (semantic == "DEPTH")
-				return "SV_DEPTH";
-		}
-
-		return semantic;
+		return "#line " + std::to_string(loc.line) + '\n';
 	}
 
 	inline id make_id() { return _next_id++; }
 
 	inline std::string id_to_name(id id) const
 	{
+		if (const auto it = _remapped_sampler_variables.find(id); it != _remapped_sampler_variables.end())
+			id = it->second;
+		assert(id != 0);
 		if (const auto it = _names.find(id); it != _names.end())
 			return it->second;
 		return '_' + std::to_string(id);
+	}
+
+	static std::string escape_name(const std::string &name)
+	{
+		std::string res = name;
+
+		static const std::unordered_set<std::string> s_reserverd_names = {
+			"common", "partition", "input", "ouput", "active", "filter", "superp", "invariant",
+			"lowp", "mediump", "highp", "precision", "patch", "subroutine",
+			"abs", "sign", "all", "any", "sin", "sinh", "cos", "cosh", "tan", "tanh", "asin", "acos", "atan",
+			"exp", "exp2", "log", "log2", "sqrt", "inversesqrt", "ceil", "floor", "fract", "trunc", "round",
+			"radians", "degrees", "length", "normalize", "transpose", "determinant", "intBitsToFloat", "uintBitsToFloat",
+			"floatBitsToInt", "floatBitsToUint", "matrixCompMult", "not", "lessThan", "greaterThan", "lessThanEqual",
+			"greaterThanEqual", "equal", "notEqual", "dot", "cross", "distance", "pow", "modf", "frexp", "ldexp",
+			"min", "max", "step", "reflect", "texture", "textureOffset", "fma", "mix", "clamp", "smoothstep", "refract",
+			"faceforward", "textureLod", "textureLodOffset", "texelFetch", "main"
+		};
+
+		if (name.compare(0, 3, "gl_") == 0 || s_reserverd_names.count(name))
+			res += '_';
+		for (size_t pos = 0; (pos = res.find("__", pos)) != std::string::npos; pos += 3)
+			res.replace(pos, 2, "_US");
+
+		return res;
 	}
 
 	static void increase_indentation_level(std::string &block)
@@ -261,19 +274,17 @@ private:
 	id   define_struct(const location &loc, struct_info &info) override
 	{
 		info.definition = make_id();
-		_names[info.definition] = info.unique_name;
+		_names[info.definition] = escape_name(info.unique_name);
 
 		_structs.push_back(info);
 
 		code() += write_location(loc) + "struct " + id_to_name(info.definition) + "\n{\n";
 
 		for (const auto &member : info.member_list)
-		{
-			code() += '\t' + write_type(member.type, true) + ' ' + member.name;
-			if (!member.semantic.empty())
-				code() += " : " + convert_semantic(member.semantic);
-			code() += ";\n";
-		}
+			code() += '\t' + write_type(member.type, true) + ' ' + member.name + ";\n";
+
+		if (info.member_list.empty())
+			code() += "float _dummy;\n";
 
 		code() += "};\n";
 
@@ -292,42 +303,21 @@ private:
 		info.id = make_id();
 		info.binding = _current_sampler_binding++;
 
-		_names[info.id] = info.unique_name;
+		_names[info.id] = escape_name(info.unique_name);
 
 		_samplers.push_back(info);
 
-		if (_shader_model >= 40)
-		{
-			code() += "Texture2D " + info.unique_name + "_t : register(t" + std::to_string(info.binding) + ");\n";
-			code() += "SamplerState " + info.unique_name + "_s : register(s" + std::to_string(info.binding) + ");\n";
-			code() += write_location(loc) + "static const __sampler2D " + info.unique_name + " = { " + info.unique_name + "_t, " + info.unique_name + "_s };\n";
-		}
-		else
-		{
-			const auto tex = std::find_if(_textures.begin(), _textures.end(),
-				[&info](const auto &it) { return it.unique_name == info.texture_name; });
-			assert(tex != _textures.end());
-
-			code() += "sampler2D " + info.unique_name + "_s : register(s" + std::to_string(info.binding) + ");\n";
-			code() += write_location(loc) + "static const __sampler2D " + info.unique_name + " = { " + info.unique_name + "_s, float2(";
-
-			if (tex->semantic.empty())
-				code() += std::to_string(1.0f / tex->width) + ", " + std::to_string(1.0f / tex->height);
-			else
-				code() += "0, 0";
-
-			code() += ") }; \n";
-		}
+		code() += write_location(loc) + "layout(binding = " + std::to_string(info.binding) + ") uniform sampler2D " + id_to_name(info.id) + ";\n";
 
 		return info.id;
 	}
 	id   define_uniform(const location &loc, uniform_info &info) override
 	{
-		const unsigned int size = info.type.rows * info.type.cols * std::max(1, info.type.array_length) * 4;
-		const unsigned int alignment = 16 - (_current_cbuffer_size % 16);
-		_current_cbuffer_size += (size > alignment && (alignment != 16 || size <= 16)) ? size + alignment : size;
+		const unsigned int size = 4 * (info.type.rows == 3 ? 4 : info.type.rows) * info.type.cols * std::max(1, info.type.array_length);
+		const unsigned int alignment = size;
 		info.size = size;
-		info.offset = _current_cbuffer_size - size;
+		info.offset = align(_current_cbuffer_offset, alignment);
+		_current_cbuffer_offset = info.offset + info.size;
 
 		struct_member_info member;
 		member.type = info.type;
@@ -336,14 +326,7 @@ private:
 		const_cast<struct_info &>(find_struct(_cbuffer_type_id))
 			.member_list.push_back(std::move(member));
 
-		_blocks[_cbuffer_type_id] += write_location(loc);
-
-		if (_shader_model < 40)
-			_blocks[_cbuffer_type_id] += write_type(info.type) + " _Globals_" + info.name + " : register(c" + std::to_string(info.offset / 4) + ')';
-		else
-			_blocks[_cbuffer_type_id] += '\t' + write_type(info.type) + " _Globals_" + info.name;
-
-		_blocks[_cbuffer_type_id] += ";\n";
+		_blocks[_cbuffer_type_id] += write_location(loc) + '\t' + write_type(info.type) + " _Globals_" + info.name + ";\n";
 
 		info.member_index = static_cast<uint32_t>(_uniforms.size());
 
@@ -355,8 +338,15 @@ private:
 	{
 		const id res = make_id();
 
+		// GLSL does not allow local sampler variables, so try to remap those
+		if (!global && type.is_sampler())
+		{
+			_remapped_sampler_variables[res] = 0;
+			return res;
+		}
+
 		if (name != nullptr)
-			_names[res] = name;
+			_names[res] = escape_name(name);
 
 		code() += write_location(loc);
 
@@ -377,18 +367,16 @@ private:
 	}
 	id   define_function(const location &loc, function_info &info) override
 	{
-		return define_function(loc, info, _shader_model >= 40);
+		return define_function(loc, info, false);
 	}
 	id   define_function(const location &loc, function_info &info, bool is_entry_point)
 	{
-		std::string name = info.unique_name;
-		if (!is_entry_point)
-			name += '_';
-
 		info.definition = make_id();
-		_names[info.definition] = std::move(name);
+		_names[info.definition] = is_entry_point ? "main" : escape_name(info.unique_name);
 
 		code() += write_location(loc) + write_type(info.return_type) + ' ' + id_to_name(info.definition) + '(';
+
+		assert(info.parameter_list.empty() || !is_entry_point);
 
 		for (size_t i = 0, num_params = info.parameter_list.size(); i < num_params; ++i)
 		{
@@ -402,19 +390,11 @@ private:
 			if (param.type.is_array())
 				code() += '[' + std::to_string(param.type.array_length) + ']';
 
-			if (is_entry_point && !param.semantic.empty())
-				code() += " : " + convert_semantic(param.semantic);
-
 			if (i < num_params - 1)
 				code() += ',';
 		}
 
-		code() += ')';
-
-		if (is_entry_point && !info.return_semantic.empty())
-			code() += " : " + convert_semantic(info.return_semantic);
-
-		code() += '\n';
+		code() += ")\n";
 
 		_functions.push_back(std::make_unique<function_info>(info));
 
@@ -434,90 +414,159 @@ private:
 
 		_entry_points.push_back({ func.unique_name, is_ps });
 
-		// Only have to rewrite the entry point function signature in shader model 3
-		if (_shader_model >= 40)
-			return;
+		code() += "#ifdef ENTRY_POINT_" + func.unique_name + '\n';
 
-		auto entry_point = func;
+		function_info entry_point;
+		entry_point.return_type = { type::t_void };
 
 		const auto is_color_semantic = [](const std::string &semantic) { return semantic.compare(0, 9, "SV_TARGET") == 0 || semantic.compare(0, 5, "COLOR") == 0; };
-		const auto is_position_semantic = [](const std::string &semantic) { return semantic == "SV_POSITION" || semantic == "POSITION"; };
 
-		const auto ret = make_id();
-		_names[ret] = "ret";
+		const auto escape_name_with_builtins = [this, is_ps](const std::string &name, const std::string &semantic) -> std::string
+		{
+			if (semantic == "SV_VERTEXID" || semantic == "VERTEXID")
+				return "gl_VertexID";
+			else if (semantic == "SV_POSITION" || semantic == "POSITION" || semantic == "VPOS")
+				return is_ps ? "gl_FragCoord" : "gl_Position";
+			else if (semantic == "SV_DEPTH" || semantic == "DEPTH")
+				return "gl_FragDepth";
 
-		std::string position_variable_name;
+			return escape_name(name);
+		};
+		const auto visit_shader_param = [this, is_ps, &escape_name_with_builtins](type type, unsigned int quals, const std::string &name, const std::string &semantic) {
+			type.qualifiers = quals;
 
-		if (func.return_type.is_struct() && !is_ps)
-			// If this function returns a struct which contains a position output, keep track of its member name
+			// OpenGL does not allow varying of type boolean
+			if (type.base == type::t_bool)
+				type.base  = type::t_float;
+
+			unsigned long location = 0;
+
+			for (int i = 0, array_length = std::max(1, type.array_length); i < array_length; ++i)
+			{
+				if (!escape_name_with_builtins(std::string(), semantic).empty())
+					continue;
+				else if (semantic.compare(0, 5, "COLOR") == 0)
+					location = strtoul(semantic.c_str() + 5, nullptr, 10);
+				else if (semantic.compare(0, 8, "TEXCOORD") == 0)
+					location = strtoul(semantic.c_str() + 8, nullptr, 10) + 1;
+				else if (semantic.compare(0, 9, "SV_TARGET") == 0)
+					location = strtoul(semantic.c_str() + 9, nullptr, 10);
+
+				code() += "layout(location = " + std::to_string(location + i) + ") " + write_type(type, true) + ' ' + name;
+				if (type.is_array())
+					code() += std::to_string(i);
+				code() += ";\n";
+			}
+		};
+
+		// Translate function parameters to input/output variables
+		if (func.return_type.is_struct())
 			for (const auto &member : find_struct(func.return_type.definition).member_list)
-				if (is_position_semantic(member.semantic))
-					position_variable_name = id_to_name(ret) + '.' + member.name;
-		if (is_color_semantic(func.return_semantic))
-			// The COLOR output semantic has to be a four-component vector in shader model 3, so enforce that
-			entry_point.return_type.rows = 4;
-		else if (is_position_semantic(func.return_semantic) && !is_ps)
-			position_variable_name = id_to_name(ret);
+				visit_shader_param(member.type, type::q_out, "_return_" + member.name, member.semantic);
+		else if (!func.return_type.is_void())
+			visit_shader_param(func.return_type, type::q_out, "_return", func.return_semantic);
 
-		for (auto &param : entry_point.parameter_list)
-			if (is_color_semantic(param.semantic))
-				param.type.rows = 4;
-			else if (is_position_semantic(param.semantic))
-				if (is_ps) // Change the position input semantic in pixel shaders
-					param.semantic = "VPOS";
-				else // Keep track of the position output variable
-					position_variable_name = param.name;
+		for (const auto &param : func.parameter_list)
+			if (param.type.is_struct())
+				for (const auto &member : find_struct(param.type.definition).member_list)
+					visit_shader_param(member.type, param.type.qualifiers | member.type.qualifiers, "_param_" + param.name + '_' + member.name, member.semantic);
+			else
+				visit_shader_param(param.type, param.type.qualifiers, "_param_" + param.name, param.semantic);
 
 		define_function({}, entry_point, true);
 		enter_block(create_block());
 
-		// Clear all color output parameters so no component is left uninitialized
-		for (auto &param : entry_point.parameter_list)
-			if (is_color_semantic(param.semantic))
-				code() += '\t' + param.name + " = float4(0.0, 0.0, 0.0, 0.0);\n";
+		// Handle input parameters
+		for (const auto &param : func.parameter_list)
+		{
+			for (int i = 0, array_length = std::max(1, param.type.array_length); i < array_length; i++)
+			{
+				// Build struct from separate member input variables
+				if (param.type.is_struct())
+				{
+					code() += '\t' + write_type(param.type) + " _param_" + param.name;
+					if (param.type.is_array())
+						code() += std::to_string(i);
+					code() += " = " + write_type(param.type, false, false) + '(';
+
+					for (const auto &member : find_struct(param.type.definition).member_list)
+						code() += escape_name_with_builtins("_param_" + param.name + '_' + member.name + (param.type.is_array() ? std::to_string(i) : std::string()), member.semantic) + ", ";
+
+					code().pop_back();
+					code().pop_back();
+
+					code() += ");\n";
+				}
+			}
+
+			if (param.type.is_array())
+			{
+				code() += '\t' + write_type(param.type) + " _param_" + param.name + "[] = " + write_type(param.type, false, false) + "[](";
+
+				for (int i = 0; i < param.type.array_length; ++i)
+				{
+					code() += "_param_" + param.name + std::to_string(i);
+					if (i < param.type.array_length - 1)
+						code() += ", ";
+				}
+
+				code() += ");\n";
+			}
+		}
 
 		code() += '\t';
-		if (is_color_semantic(func.return_semantic))
-			code() += "const float4 ret = float4(";
+		// Structs cannot be output variables, so have to write to a temporary first and then output each member separately
+		if (func.return_type.is_struct())
+			code() += write_type(func.return_type) + " _return = ";
+		// All other output types can write to the output variable directly
 		else if (!func.return_type.is_void())
-			code() += write_type(func.return_type) + ' ' + id_to_name(ret) + " = ";
+			code() += "_return = ";
 
 		// Call the function this entry point refers to
 		code() += id_to_name(func.definition) + '(';
 
 		for (size_t i = 0, num_params = func.parameter_list.size(); i < num_params; ++i)
 		{
-			code() += func.parameter_list[i].name;
-
-			if (is_color_semantic(func.parameter_list[i].semantic))
-			{
-				code() += '.';
-				for (unsigned int k = 0; k < func.parameter_list[i].type.rows; k++)
-					code() += "xyzw"[k];
-			}
+			code() += escape_name_with_builtins("_param_" + func.parameter_list[i].name, func.parameter_list[i].semantic);
 
 			if (i < num_params - 1)
 				code() += ", ";
 		}
 
-		code() += ')';
+		code() += ");\n";
 
-		// Cast the output value to a four-component vector
-		if (is_color_semantic(func.return_semantic))
+		// Handle output parameters
+		for (const auto &param : func.parameter_list)
 		{
-			for (unsigned int i = 0; i < 4 - func.return_type.rows; i++)
-				code() += ", 0.0";
-			code() += ')';
+			if (!param.type.has(type::q_out))
+				continue;
+
+			for (int i = 0; i < param.type.array_length; i++)
+				code() += "\t_param_" + param.name + std::to_string(i) + " = _param_" + param.name + '[' + std::to_string(i) + "];\n";
+
+			for (int i = 0; i < std::max(1, param.type.array_length); i++)
+				if (param.type.is_struct())
+					for (const auto &member : find_struct(param.type.definition).member_list)
+						if (param.type.is_array())
+							code() += "\t_param_" + param.name + '_' + member.name + std::to_string(i) + " = _param_" + param.name + '.' + member.name + '[' + std::to_string(i) + "];\n";
+						else
+							code() += "\t_param_" + param.name + '_' + member.name + " = _param_" + param.name + '.' + member.name + ";\n";
 		}
 
-		code() += ";\n";
+		// Handle return struct output variables
+		if (func.return_type.is_struct())
+			for (const auto &member : find_struct(func.return_type.definition).member_list)
+				code() += '\t' + escape_name_with_builtins("_return_" + member.name, member.semantic) + " = _return." + member.name + ";\n";
 
-		// Shift everything by half a viewport pixel to workaround the different half-pixel offset in D3D9 (https://aras-p.info/blog/2016/04/08/solving-dx9-half-pixel-offset/)
-		if (!position_variable_name.empty() && !is_ps) // Check if we are in a vertex shader definition
-			code() += '\t' + position_variable_name + ".xy += __TEXEL_SIZE__ * " + position_variable_name + ".ww;\n";
+#if 0
+		if (!is_ps) // Flip image horizontally to match DirectX clip space definition
+			code() += "\tgl_Position = gl_Position * vec4(1.0, 1.0, 2.0, 1.0) + vec4(0.0, 0.0, -gl_Position.w, 0.0);\n";
+#endif
 
-		leave_block_and_return(func.return_type.is_void() ? 0 : ret);
+		leave_block_and_return(0);
 		leave_function();
+
+		code() += "#endif\n";
 	}
 
 	id   emit_load(const expression &chain) override
@@ -544,7 +593,7 @@ private:
 			switch (op.type)
 			{
 			case expression::operation::op_cast:
-				newcode = "((" + write_type(op.to, false, false) + ')' + newcode + ')';
+				newcode = write_type(op.to, false, false) + '(' + newcode + ')';
 				break;
 			case expression::operation::op_index:
 				newcode += '[' + id_to_name(op.index) + ']';
@@ -554,22 +603,45 @@ private:
 				newcode += find_struct(op.from.definition).member_list[op.index].name;
 				break;
 			case expression::operation::op_swizzle:
-				newcode += '.';
-				for (unsigned int i = 0; i < 4 && op.swizzle[i] >= 0; ++i)
-					if (op.from.is_matrix())
-						newcode += s_matrix_swizzles[op.swizzle[i]];
+				if (op.from.is_matrix())
+				{
+					if (op.swizzle[1] < 0)
+					{
+						const unsigned int row = op.swizzle[0] % 4;
+						const unsigned int col = (op.swizzle[0] - row) / 4;
+
+						newcode += '[' + std::to_string(row) + "][" + std::to_string(col) + ']';
+					}
 					else
+					{
+						assert(false);
+					}
+				}
+				else
+				{
+					newcode += '.';
+					for (unsigned int i = 0; i < 4 && op.swizzle[i] >= 0; ++i)
 						newcode += "xyzw"[op.swizzle[i]];
+				}
 				break;
 			}
 		}
 
-		code() += newcode + ";\n";
+		code() += newcode;
+
+		code() += ";\n";
 
 		return res;
 	}
 	void emit_store(const expression &chain, id value, const type &) override
 	{
+		if (const auto it = _remapped_sampler_variables.find(chain.base); it != _remapped_sampler_variables.end())
+		{
+			assert(it->second == 0);
+			it->second = value;
+			return;
+		}
+
 		code() += write_location(chain.location) + '\t' + id_to_name(chain.base);
 
 		for (const auto &op : chain.ops)
@@ -584,12 +656,26 @@ private:
 				code() += find_struct(op.from.definition).member_list[op.index].name;
 				break;
 			case expression::operation::op_swizzle:
-				code() += '.';
-				for (unsigned int i = 0; i < 4 && op.swizzle[i] >= 0; ++i)
-					if (op.from.is_matrix())
-						code() += s_matrix_swizzles[op.swizzle[i]];
+				if (op.from.is_matrix())
+				{
+					if (op.swizzle[1] < 0)
+					{
+						const unsigned int row = op.swizzle[0] % 4;
+						const unsigned int col = (op.swizzle[0] - row) / 4;
+
+						code() += '[' + std::to_string(row) + "][" + std::to_string(col) + ']';
+					}
 					else
+					{
+						assert(false);
+					}
+				}
+				else
+				{
+					code() += '.';
+					for (unsigned int i = 0; i < 4 && op.swizzle[i] >= 0; ++i)
 						code() += "xyzw"[op.swizzle[i]];
+				}
 				break;
 			}
 		}
@@ -600,6 +686,13 @@ private:
 	id   emit_constant(const type &type, const constant &data) override
 	{
 		const id res = make_id();
+
+		// Struct initialization is not supported right now
+		if (type.is_struct())
+		{
+			code() += '\t' + write_type(type) + ' ' + id_to_name(res) + ";\n";
+			return res;
+		}
 
 		code() += "\tconst " + write_type(type) + ' ' + id_to_name(res);
 
@@ -617,102 +710,136 @@ private:
 
 		code() += write_location(loc) + '\t' + write_type(res_type) + ' ' + id_to_name(res) + " = ";
 
-		if (_shader_model < 40 && op == tokenid::tilde)
-			code() += "0xFFFFFFFF -"; // Emulate bitwise not operator on shader model 3
-		else
-			code() += char(op);
+		switch (op)
+		{
+		case tokenid::minus:
+			code() += '-';
+			break;
+		case tokenid::tilde:
+			code() += '~';
+			break;
+		case tokenid::exclaim:
+			if (res_type.is_vector())
+				code() += "not";
+			else
+				code() += "!bool";
+			break;
+		default:
+			assert(false);
+		}
 
-		code() += ' ' + id_to_name(val) + ";\n";
+		code() += "(" + id_to_name(val) + ");\n";
 
 		return res;
 	}
-	id   emit_binary_op(const location &loc, tokenid op, const type &res_type, const type &, id lhs, id rhs) override
+	id   emit_binary_op(const location &loc, tokenid op, const type &res_type, const type &type, id lhs, id rhs) override
 	{
 		const id res = make_id();
 
 		code() += write_location(loc) + '\t' + write_type(res_type) + ' ' + id_to_name(res) + " = ";
 
-		if (_shader_model < 40 && (op == tokenid::greater_greater || op == tokenid::greater_greater_equal))
-			code() += "floor(";
-
-		code() += '(' + id_to_name(lhs) + ' ';
+		std::string intrinsic, operator_code;
 
 		switch (op)
 		{
 		case tokenid::plus:
 		case tokenid::plus_plus:
 		case tokenid::plus_equal:
-			code() += '+';
+			operator_code = '+';
 			break;
 		case tokenid::minus:
 		case tokenid::minus_minus:
 		case tokenid::minus_equal:
-			code() += '-';
+			operator_code = '-';
 			break;
 		case tokenid::star:
 		case tokenid::star_equal:
-			code() += '*';
+			if (type.is_matrix())
+				intrinsic = "matrixCompMult";
+			else
+				operator_code = '*';
 			break;
 		case tokenid::slash:
 		case tokenid::slash_equal:
-			code() += '/';
+			operator_code = '/';
 			break;
 		case tokenid::percent:
 		case tokenid::percent_equal:
-			code() += '%';
+			if (type.is_floating_point())
+				intrinsic = "hlsl_fmod";
+			else
+				operator_code = '%';
 			break;
 		case tokenid::caret:
 		case tokenid::caret_equal:
-			code() += '^';
+			operator_code = '^';
 			break;
 		case tokenid::pipe:
 		case tokenid::pipe_equal:
-			code() += '|';
+			operator_code = '|';
 			break;
 		case tokenid::ampersand:
 		case tokenid::ampersand_equal:
-			code() += '&';
+			operator_code = '&';
 			break;
 		case tokenid::less_less:
 		case tokenid::less_less_equal:
-			code() += _shader_model >= 40 ? "<<" : ") * exp2("; // Emulate bitwise shift operators on shader model 3
+			operator_code = "<<";
 			break;
 		case tokenid::greater_greater:
 		case tokenid::greater_greater_equal:
-			code() += _shader_model >= 40 ? ">>" : ") / exp2(";
+			operator_code = ">>";
 			break;
 		case tokenid::pipe_pipe:
-			code() += "||";
+			operator_code = "||";
 			break;
 		case tokenid::ampersand_ampersand:
-			code() += "&&";
+			operator_code = "&&";
 			break;
 		case tokenid::less:
-			code() += '<';
+			if (type.is_vector())
+				intrinsic = "lessThan";
+			else
+				operator_code = '<';
 			break;
 		case tokenid::less_equal:
-			code() += "<=";
+			if (type.is_vector())
+				intrinsic = "lessThanEqual";
+			else
+				operator_code = "<=";
 			break;
 		case tokenid::greater:
-			code() += '>';
+			if (type.is_vector())
+				intrinsic = "greaterThan";
+			else
+				operator_code = '>';
 			break;
 		case tokenid::greater_equal:
-			code() += ">=";
+			if (type.is_vector())
+				intrinsic = "greaterThanEqual";
+			else
+				operator_code = ">=";
 			break;
 		case tokenid::equal_equal:
-			code() += "==";
+			if (type.is_vector())
+				intrinsic = "equal";
+			else
+				operator_code = "==";
 			break;
 		case tokenid::exclaim_equal:
-			code() += "!=";
+			if (type.is_vector())
+				intrinsic = "notEqual";
+			else
+				operator_code = "!=";
 			break;
 		default:
 			assert(false);
 		}
 
-		code() += ' ' + id_to_name(rhs) + ')';
-
-		if (_shader_model < 40 && (op == tokenid::greater_greater || op == tokenid::greater_greater_equal))
-			code() += ')';
+		if (!intrinsic.empty())
+			code() += intrinsic + '(' + id_to_name(lhs) + ", " + id_to_name(rhs) + ')';
+		else
+			code() += id_to_name(lhs) + ' ' + operator_code + ' ' + id_to_name(rhs);
 
 		code() += ";\n";
 
@@ -729,7 +856,13 @@ private:
 		if (res_type.is_array())
 			code() += '[' + std::to_string(res_type.array_length) + ']';
 
-		code() += " = " + id_to_name(condition) + " ? " + id_to_name(true_value) + " : " + id_to_name(false_value) + ";\n";
+		code() += " = ";
+
+		// GLSL requires the selection first expression to be a scalar boolean
+		if (!res_type.is_scalar())
+			code() += "all";
+
+		code() += '(' + id_to_name(condition) + ") ? " + id_to_name(true_value) + " : " + id_to_name(false_value) + ";\n";
 
 		return res;
 	}
@@ -775,25 +908,20 @@ private:
 
 		code() += write_location(loc) + '\t';
 
-		enum
-		{
-#define IMPLEMENT_INTRINSIC_HLSL(name, i, code) name##i,
-#include "effect_symbol_table_intrinsics.inl"
-		};
-
-		if (_shader_model >= 40 && (intrinsic == tex2Dsize0 || intrinsic == tex2Dsize1))
-		{
-			// Implementation of the 'tex2Dsize' intrinsic passes the result variable into 'GetDimensions' as output argument
-			code() += write_type(res_type) + ' ' + id_to_name(res) + "; ";
-		}
-		else if (!res_type.is_void())
+		if (!res_type.is_void())
 		{
 			code() += write_type(res_type) + ' ' + id_to_name(res) + " = ";
 		}
 
+		enum
+		{
+#define IMPLEMENT_INTRINSIC_GLSL(name, i, code) name##i,
+#include "effect_symbol_table_intrinsics.inl"
+		};
+
 		switch (intrinsic)
 		{
-#define IMPLEMENT_INTRINSIC_HLSL(name, i, code) case name##i: code break;
+#define IMPLEMENT_INTRINSIC_GLSL(name, i, code) case name##i: code break;
 #include "effect_symbol_table_intrinsics.inl"
 		default:
 			assert(false);
@@ -817,10 +945,15 @@ private:
 
 		code() += " = ";
 
+		if (!type.is_array() && type.is_matrix())
+			code() += "transpose(";
+
+		code() += write_type(type, false, false);
+
 		if (type.is_array())
-			code() += "{ ";
-		else
-			code() += write_type(type, false, false) + '(';
+			code() += "[]";
+
+		code() += '(';
 
 		for (size_t i = 0, num_args = args.size(); i < num_args; ++i)
 		{
@@ -830,17 +963,15 @@ private:
 				code() += ", ";
 		}
 
-		if (type.is_array())
-			code() += " }";
-		else
+		if (!type.is_array() && type.is_matrix())
 			code() += ')';
 
-		code() += ";\n";
+		code() += ");\n";
 
 		return res;
 	}
 
-	void emit_if(const location &loc, id condition_value, id condition_block, id true_statement_block, id false_statement_block, unsigned int flags) override
+	void emit_if(const location &loc, id condition_value, id condition_block, id true_statement_block, id false_statement_block, unsigned int) override
 	{
 		assert(condition_value != 0 && condition_block != 0 && true_statement_block != 0 && false_statement_block != 0);
 
@@ -849,9 +980,6 @@ private:
 
 		code() += _blocks[condition_block];
 		code() += write_location(loc);
-
-		if (flags & flatten) code() += "[flatten]";
-		if (flags & dont_flatten) code() += "[branch]";
 
 		code() += "\tif (" + id_to_name(condition_value) + ")\n\t{\n" + _blocks[true_statement_block] + "\t}\n";
 
@@ -890,7 +1018,7 @@ private:
 
 		return res;
 	}
-	void emit_loop(const location &loc, id condition_value, id prev_block, id header_block, id condition_block, id loop_block, id continue_block, unsigned int flags) override
+	void emit_loop(const location &loc, id condition_value, id prev_block, id header_block, id condition_block, id loop_block, id continue_block, unsigned int) override
 	{
 		assert(condition_value != 0 && prev_block != 0 && header_block != 0 && loop_block != 0 && continue_block != 0);
 
@@ -905,9 +1033,6 @@ private:
 			code() += _blocks[condition_block];
 
 		code() += write_location(loc) + '\t';
-
-		if (flags & unroll) code() += "[unroll] ";
-		if (flags & dont_unroll) code() += "[loop] ";
 
 		if (condition_block == 0)
 		{
@@ -940,17 +1065,12 @@ private:
 		_blocks.erase(loop_block);
 		_blocks.erase(continue_block);
 	}
-	void emit_switch(const location &loc, id selector_value, id selector_block, id default_label, const std::vector<id> &case_literal_and_labels, unsigned int flags) override
+	void emit_switch(const location &loc, id selector_value, id selector_block, id default_label, const std::vector<id> &case_literal_and_labels, unsigned int) override
 	{
 		assert(selector_value != 0 && selector_block != 0 && default_label != 0);
 
 		code() += _blocks[selector_block];
-		code() += write_location(loc) + '\t';
-
-		if (flags & flatten) code() += "[flatten]";
-		if (flags & dont_flatten) code() += "[branch]";
-
-		code() += "switch (" + id_to_name(selector_value) + ")\n\t{\n";
+		code() += write_location(loc) + "\tswitch (" + id_to_name(selector_value) + ")\n\t{\n";
 
 		for (size_t i = 0; i < case_literal_and_labels.size(); i += 2)
 		{
@@ -1067,7 +1187,7 @@ private:
 	}
 };
 
-codegen *create_codegen_hlsl(unsigned int shader_model, bool debug_info)
+codegen *create_codegen_glsl(bool debug_info)
 {
-	return new codegen_hlsl(shader_model, debug_info);
+	return new codegen_glsl(debug_info);
 }

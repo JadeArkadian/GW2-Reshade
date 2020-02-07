@@ -11,380 +11,31 @@
 struct on_scope_exit
 {
 	template <typename F>
-	on_scope_exit(F lambda)
-		: leave(lambda) { }
+	on_scope_exit(F lambda) : leave(lambda) { }
 	~on_scope_exit() { leave(); }
 	std::function<void()> leave;
 };
 
-static reshadefx::constant evaluate_constant_expression(reshadefx::tokenid op, const reshadefx::type &type, const reshadefx::constant &lhs)
-{
-	using namespace reshadefx;
-
-	reshadefx::constant res = {};
-
-	switch (op)
-	{
-	case tokenid::exclaim:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] = !lhs.as_uint[i];
-		break;
-	case tokenid::minus:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] = -lhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_int[i] = -lhs.as_int[i];
-		break;
-	case tokenid::tilde:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] = ~lhs.as_uint[i];
-		break;
-	}
-
-	return res;
-}
-static reshadefx::constant evaluate_constant_expression(reshadefx::tokenid op, const reshadefx::type &type, const reshadefx::constant &lhs, const reshadefx::constant &rhs)
-{
-	using namespace reshadefx;
-
-	reshadefx::constant res = lhs;
-
-	switch (op)
-	{
-	case tokenid::percent:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] = fmodf(lhs.as_float[i], rhs.as_float[i]);
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_int[i] %= rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] %= rhs.as_uint[i];
-		break;
-	case tokenid::star:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] *= rhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] *= rhs.as_uint[i];
-		break;
-	case tokenid::plus:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] += rhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] += rhs.as_uint[i];
-		break;
-	case tokenid::minus:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] -= rhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] -= rhs.as_uint[i];
-		break;
-	case tokenid::slash:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_float[i] /= rhs.as_float[i];
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_int[i] /= rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] /= rhs.as_uint[i];
-		break;
-	case tokenid::ampersand:
-	case tokenid::ampersand_ampersand:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] &= rhs.as_uint[i];
-		break;
-	case tokenid::pipe:
-	case tokenid::pipe_pipe:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] |= rhs.as_uint[i];
-		break;
-	case tokenid::caret:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] ^= rhs.as_uint[i];
-		break;
-	case tokenid::less:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] < rhs.as_float[i];
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_int[i] < rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] < rhs.as_uint[i];
-		break;
-	case tokenid::less_equal:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] <= rhs.as_float[i];
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_int[i] <= rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] <= rhs.as_uint[i];
-		break;
-	case tokenid::greater:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] > rhs.as_float[i];
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_int[i] > rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] > rhs.as_uint[i];
-		break;
-	case tokenid::greater_equal:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] >= rhs.as_float[i];
-		else if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_int[i] >= rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] >= rhs.as_uint[i];
-		break;
-	case tokenid::equal_equal:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] == rhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] == rhs.as_uint[i];
-		break;
-	case tokenid::exclaim_equal:
-		if (type.is_floating_point())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_float[i] != rhs.as_float[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] = lhs.as_uint[i] != rhs.as_uint[i];
-		break;
-	case tokenid::less_less:
-		for (unsigned int i = 0; i < type.components(); ++i)
-			res.as_uint[i] <<= rhs.as_uint[i];
-		break;
-	case tokenid::greater_greater:
-		if (type.is_signed())
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_int[i] >>= rhs.as_int[i];
-		else
-			for (unsigned int i = 0; i < type.components(); ++i)
-				res.as_uint[i] >>= rhs.as_uint[i];
-		break;
-	}
-
-	return res;
-}
-
-void reshadefx::expression::add_cast_operation(const reshadefx::type &in_type)
-{
-	if (type == in_type)
-		return; // There is nothing to do if the expression is already of the target type
-
-	if (is_constant)
-	{
-		const auto cast_constant = [](reshadefx::constant &constant, const reshadefx::type &from, const reshadefx::type &to) {
-			if (to.is_integral() || to.is_boolean())
-			{
-				if (!from.is_integral())
-				{
-					for (unsigned int i = 0; i < 16; ++i)
-						constant.as_uint[i] = static_cast<int>(constant.as_float[i]);
-				}
-				else
-				{
-					// int 2 uint
-				}
-			}
-			else
-			{
-				if (!from.is_integral() && !from.is_boolean())
-				{
-					// Scalar to vector promotion
-					assert(from.is_floating_point() && from.is_scalar() && to.is_vector());
-					for (unsigned int i = 1; i < to.components(); ++i)
-						constant.as_float[i] = constant.as_float[0];
-				}
-				else
-				{
-					if (from.is_scalar())
-					{
-						const float value = static_cast<float>(static_cast<int>(constant.as_uint[0]));
-						for (unsigned int i = 0; i < 16; ++i)
-							constant.as_float[i] = value;
-					}
-					else
-					{
-						for (unsigned int i = 0; i < 16; ++i)
-							constant.as_float[i] = static_cast<float>(static_cast<int>(constant.as_uint[i]));
-					}
-				}
-			}
-		};
-
-		for (size_t i = 0; i < constant.array_data.size(); ++i)
-		{
-			cast_constant(constant.array_data[i], type, in_type);
-		}
-
-		cast_constant(constant, type, in_type);
-	}
-	else
-	{
-		if (type.is_vector() && in_type.is_scalar())
-		{
-			ops.push_back({ operation::op_swizzle, type, in_type, 0, { 0, -1, -1, -1 } });
-		}
-		else
-		{
-			ops.push_back({ operation::op_cast, type, in_type });
-		}
-	}
-
-	type = in_type;
-	//is_lvalue = false; // Can't do this because of 'if (chain.is_lvalue)' check in 'add_load_operation'
-}
-void reshadefx::expression::add_member_access(reshadefx::codegen *codegen, size_t index, const reshadefx::type &in_type)
-{
-	reshadefx::type target_type = in_type;
-	target_type.is_ptr = true;
-
-	reshadefx::constant index_c = {};
-	index_c.as_uint[0] = index;
-	ops.push_back({ operation::op_index, type, target_type, codegen->emit_constant({ type::t_uint, 1, 1 }, index_c) });
-
-	type = in_type;
-	is_constant = false;
-}
-void reshadefx::expression::add_static_index_access(reshadefx::codegen *codegen, size_t index)
-{
-	if (!is_constant)
-	{
-		constant.as_uint[0] = index;
-		memset(&constant.as_uint[1], 0, sizeof(uint32_t) * 15); // Clear the reset of the constant
-		return add_dynamic_index_access(codegen, codegen->emit_constant({ type::t_uint, 1, 1 }, constant));
-	}
-
-	if (type.is_array())
-	{
-		type.array_length = 0;
-
-		constant = constant.array_data[index];
-	}
-	else if (type.is_matrix()) // Indexing into a matrix returns a row of it as a vector
-	{
-		type.rows = type.cols, type.cols = 1;
-
-		for (unsigned int i = 0; i < 4; ++i)
-			constant.as_uint[i] = constant.as_uint[index * 4 + i];
-		memset(&constant.as_uint[4], 0, sizeof(uint32_t) * 12); // Clear the reset of the constant
-	}
-	else if (type.is_vector()) // Indexing into a vector returns the element as a scalar
-	{
-		type.rows = 1;
-
-		constant.as_uint[0] = constant.as_uint[index];
-		memset(&constant.as_uint[1], 0, sizeof(uint32_t) * 15); // Clear the reset of the constant
-	}
-	else
-	{
-		assert(false);
-	}
-}
-void reshadefx::expression::add_dynamic_index_access(reshadefx::codegen *codegen, reshadefx::codegen::id index_expression)
-{
-	reshadefx::type target_type = type;
-	if (target_type.is_array())
-		target_type.array_length = 0;
-	else if (target_type.is_matrix())
-		target_type.rows = target_type.cols,
-		target_type.cols = 1;
-	else if (target_type.is_vector())
-		target_type.rows = 1;
-
-	target_type.is_ptr = true; // OpAccessChain returns a pointer
-
-	if (is_constant)
-	{
-		auto index_constant = codegen->emit_constant(type, constant);
-		type.is_ptr = true;
-		base = codegen->define_variable(location, type, nullptr, false, index_constant);
-		type.is_ptr = false;
-		is_lvalue = true;
-	}
-
-	ops.push_back({ operation::op_index, type, target_type, index_expression });
-
-	type = target_type;
-	type.is_ptr = false;
-	is_constant = false;
-}
-void reshadefx::expression::add_swizzle_access(reshadefx::codegen *codegen, signed char in_swizzle[4], size_t length)
-{
-	// Indexing logic is simpler, so use that when possible
-	if (length == 1 && type.is_vector())
-		return add_static_index_access(codegen, in_swizzle[0]);
-
-	// Check for redundant swizzle and ignore them
-	//if (type.is_vector() && length == type.rows)
-	//{
-	//	bool ignore = true;
-	//	for (unsigned int i = 0; i < length; ++i)
-	//		if (in_swizzle[i] != i)
-	//			ignore = false;
-	//	if (ignore)
-	//		return;
-	//}
-
-	reshadefx::type target_type = type;
-	target_type.rows = static_cast<unsigned int>(length);
-	target_type.cols = 1;
-
-	if (is_constant)
-	{
-		uint32_t data[16];
-		memcpy(data, &constant.as_uint[0], sizeof(data));
-		for (size_t i = 0; i < length; ++i)
-			constant.as_uint[i] = data[in_swizzle[i]];
-		memset(&constant.as_uint[length], 0, sizeof(uint32_t) * (16 - length)); // Clear the reset of the constant
-	}
-	else
-	{
-		ops.push_back({ operation::op_swizzle, type, target_type, 0, { in_swizzle[0], in_swizzle[1], in_swizzle[2], in_swizzle[3] } });
-	}
-
-	type = target_type;
-	type.is_ptr = false;
-}
-
 // -- Parsing -- //
 
-reshadefx::parser::parser(codegen_backend backend)
+reshadefx::parser::parser(codegen::backend backend, unsigned int shader_model, bool debug_info)
 {
 	switch (backend)
 	{
-	case codegen_backend::hlsl:
-		extern reshadefx::codegen *create_codegen_hlsl();
-		_codegen.reset(create_codegen_hlsl());
+	case codegen::backend::glsl:
+		extern reshadefx::codegen *create_codegen_glsl(bool);
+		_codegen.reset(create_codegen_glsl(debug_info));
 		break;
-	case codegen_backend::spirv:
-		extern reshadefx::codegen *create_codegen_spirv();
-		_codegen.reset(create_codegen_spirv());
+	case codegen::backend::hlsl:
+		extern reshadefx::codegen *create_codegen_hlsl(unsigned int, bool);
+		_codegen.reset(create_codegen_hlsl(shader_model, debug_info));
 		break;
+	case codegen::backend::spirv:
+		extern reshadefx::codegen *create_codegen_spirv(bool);
+		_codegen.reset(create_codegen_spirv(debug_info));
+		break;
+	default:
+		assert(false);
 	}
 }
 
@@ -410,13 +61,9 @@ void reshadefx::parser::error(const location &location, unsigned int code, const
 	_errors += location.source + '(' + std::to_string(location.line) + ", " + std::to_string(location.column) + ')' + ": ";
 
 	if (code == 0)
-	{
 		_errors += "error: ";
-	}
 	else
-	{
 		_errors += "error X" + std::to_string(code) + ": ";
-	}
 
 	_errors += message + '\n';
 }
@@ -425,13 +72,9 @@ void reshadefx::parser::warning(const location &location, unsigned int code, con
 	_errors += location.source + '(' + std::to_string(location.line) + ", " + std::to_string(location.column) + ')' + ": ";
 
 	if (code == 0)
-	{
 		_errors += "warning: ";
-	}
 	else
-	{
 		_errors += "warning X" + std::to_string(code) + ": ";
-	}
 
 	_errors += message + '\n';
 }
@@ -480,7 +123,7 @@ bool reshadefx::parser::expect(tokenid tokid)
 {
 	if (!accept(tokid))
 	{
-		error(_token_next.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token_next.id) + "', expected '" + token::id_to_name(tokid) + "'");
+		error(_token_next.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token_next.id) + "', expected '" + token::id_to_name(tokid) + '\'');
 		return false;
 	}
 
@@ -577,14 +220,14 @@ bool reshadefx::parser::accept_type_class(type &type)
 	case tokenid::bool3:
 	case tokenid::bool4:
 		type.base = type::t_bool;
-		type.rows = 1 + uint32_t(_token_next.id) - uint32_t(tokenid::bool_);
+		type.rows = 1 + unsigned int(_token_next.id) - unsigned int(tokenid::bool_);
 		type.cols = 1;
 		break;
 	case tokenid::bool2x2:
 	case tokenid::bool3x3:
 	case tokenid::bool4x4:
 		type.base = type::t_bool;
-		type.rows = 2 + uint32_t(_token_next.id) - uint32_t(tokenid::bool2x2);
+		type.rows = 2 + unsigned int(_token_next.id) - unsigned int(tokenid::bool2x2);
 		type.cols = type.rows;
 		break;
 	case tokenid::int_:
@@ -592,14 +235,14 @@ bool reshadefx::parser::accept_type_class(type &type)
 	case tokenid::int3:
 	case tokenid::int4:
 		type.base = type::t_int;
-		type.rows = 1 + uint32_t(_token_next.id) - uint32_t(tokenid::int_);
+		type.rows = 1 + unsigned int(_token_next.id) - unsigned int(tokenid::int_);
 		type.cols = 1;
 		break;
 	case tokenid::int2x2:
 	case tokenid::int3x3:
 	case tokenid::int4x4:
 		type.base = type::t_int;
-		type.rows = 2 + uint32_t(_token_next.id) - uint32_t(tokenid::int2x2);
+		type.rows = 2 + unsigned int(_token_next.id) - unsigned int(tokenid::int2x2);
 		type.cols = type.rows;
 		break;
 	case tokenid::uint_:
@@ -607,14 +250,14 @@ bool reshadefx::parser::accept_type_class(type &type)
 	case tokenid::uint3:
 	case tokenid::uint4:
 		type.base = type::t_uint;
-		type.rows = 1 + uint32_t(_token_next.id) - uint32_t(tokenid::uint_);
+		type.rows = 1 + unsigned int(_token_next.id) - unsigned int(tokenid::uint_);
 		type.cols = 1;
 		break;
 	case tokenid::uint2x2:
 	case tokenid::uint3x3:
 	case tokenid::uint4x4:
 		type.base = type::t_uint;
-		type.rows = 2 + uint32_t(_token_next.id) - uint32_t(tokenid::uint2x2);
+		type.rows = 2 + unsigned int(_token_next.id) - unsigned int(tokenid::uint2x2);
 		type.cols = type.rows;
 		break;
 	case tokenid::float_:
@@ -622,14 +265,14 @@ bool reshadefx::parser::accept_type_class(type &type)
 	case tokenid::float3:
 	case tokenid::float4:
 		type.base = type::t_float;
-		type.rows = 1 + uint32_t(_token_next.id) - uint32_t(tokenid::float_);
+		type.rows = 1 + unsigned int(_token_next.id) - unsigned int(tokenid::float_);
 		type.cols = 1;
 		break;
 	case tokenid::float2x2:
 	case tokenid::float3x3:
 	case tokenid::float4x4:
 		type.base = type::t_float;
-		type.rows = 2 + uint32_t(_token_next.id) - uint32_t(tokenid::float2x2);
+		type.rows = 2 + unsigned int(_token_next.id) - unsigned int(tokenid::float2x2);
 		type.cols = type.rows;
 		break;
 	case tokenid::string_:
@@ -837,7 +480,7 @@ bool reshadefx::parser::accept_assignment_op()
 
 	return true;
 }
-#define RESHADEFX_SHORT_CIRCUIT 0
+
 bool reshadefx::parser::parse_expression(expression &exp)
 {
 	// Parse first expression
@@ -897,13 +540,10 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 			if (op == tokenid::exclaim && !exp.type.is_boolean())
 				exp.add_cast_operation({ type::t_bool, exp.type.rows, exp.type.cols }); // The result type will be boolean as well
 
+			// Constant expressions can be evaluated at compile time
 			if (exp.is_constant)
-			{
-				// Constant expressions can be evaluated at compile time
-				exp.constant = evaluate_constant_expression(op, exp.type, exp.constant);
-			}
-			else
-			{
+				exp.evaluate_constant_expression(op);
+			else {
 				const auto value = _codegen->emit_load(exp);
 				const auto result = _codegen->emit_unary_op(location, op, exp.type, value);
 
@@ -998,7 +638,13 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		{
 			composite_type.array_length = static_cast<int>(elements.size());
 
-			const auto result = _codegen->emit_construct(composite_type, elements);
+			// Resolve all access chains
+			for (expression &element : elements)
+			{
+				element.reset_to_rvalue(element.location, _codegen->emit_load(element), element.type);
+			}
+
+			const auto result = _codegen->emit_construct(location, composite_type, elements);
 
 			exp.reset_to_rvalue(location, result, composite_type);
 		}
@@ -1103,7 +749,37 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		}
 		else if (arguments.size() > 1)
 		{
-			const auto result = _codegen->emit_construct(type, arguments);
+			// Flatten all arguments to a list of scalars
+			for (auto it = arguments.begin(); it != arguments.end();)
+			{
+				// Argument is a scalar already, so only need to cast it
+				if (it->type.is_scalar())
+				{
+					expression &argument = *it++;
+
+					auto scalar_type = argument.type;
+					scalar_type.base = type.base;
+					argument.add_cast_operation(scalar_type);
+
+					argument.reset_to_rvalue(argument.location, _codegen->emit_load(argument), scalar_type);
+				}
+				else
+				{
+					const expression argument = *it;
+					it = arguments.erase(it);
+
+					// Convert to a scalar value and re-enter the loop in the next iteration (in case a cast is necessary too)
+					for (unsigned int i = argument.type.components(); i > 0; --i)
+					{
+						expression scalar = argument;
+						scalar.add_static_index_access(_codegen.get(), i - 1);
+
+						it = arguments.insert(it, scalar);
+					}
+				}
+			}
+
+			const auto result = _codegen->emit_construct(location, type, arguments);
 
 			exp.reset_to_rvalue(location, result, type);
 		}
@@ -1125,7 +801,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		if (exclusive ? expect(tokenid::identifier) : accept(tokenid::identifier))
 			identifier = std::move(_token.literal_as_string);
 		else
-			return false; // Warning: This may leave the expression path without issuing an error, so need to catch that at the target side!
+			return false; // Warning: This may leave the expression path without issuing an error, so need to catch that at the call side!
 
 		// Can concatenate multiple '::' to force symbol search for a specific namespace level
 		while (accept(tokenid::colon_colon))
@@ -1173,11 +849,11 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 			if (!resolve_function_call(identifier, arguments, scope, symbol, ambiguous))
 			{
 				if (undeclared)
-					error(location, 3004, "undeclared identifier '" + identifier + "'");
+					error(location, 3004, "undeclared identifier '" + identifier + '\'');
 				else if (ambiguous)
-					error(location, 3067, "ambiguous function call to '" + identifier + "'");
+					error(location, 3067, "ambiguous function call to '" + identifier + '\'');
 				else
-					error(location, 3013, "no matching function overload for '" + identifier + "'");
+					error(location, 3013, "no matching function overload for '" + identifier + '\'');
 				return false;
 			}
 
@@ -1193,14 +869,13 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				if (arguments[i].type.components() > param_type.components())
 					warning(arguments[i].location, 3206, "implicit truncation of vector type");
 
-				auto target_type = param_type;
-				target_type.is_ptr = false;
-				arguments[i].add_cast_operation(target_type);
+				arguments[i].add_cast_operation(param_type);
 
-				if (param_type.is_ptr)
+				if (symbol.op == symbol_type::function || param_type.has(type::q_out))
 				{
-					const auto variable = _codegen->define_variable(arguments[i].location, param_type, nullptr, false, 0);
-					parameters[i].reset_to_lvalue(arguments[i].location, variable, param_type);
+					// All user-defined functions actually accept pointers as arguments, same applies to intrinsics with 'out' parameters
+					const auto temp_variable = _codegen->define_variable(arguments[i].location, param_type, nullptr, false);
+					parameters[i].reset_to_lvalue(arguments[i].location, temp_variable, param_type);
 				}
 				else
 				{
@@ -1228,14 +903,14 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		else if (symbol.op == symbol_type::invalid)
 		{
 			// Show error if no symbol matching the identifier was found
-			return error(location, 3004, "undeclared identifier '" + identifier + "'"), false;
+			return error(location, 3004, "undeclared identifier '" + identifier + '\''), false;
 		}
 		else if (symbol.op == symbol_type::uniform)
 		{
 			assert(symbol.id != 0);
 			// Uniform variables need to be dereferenced
-			exp.reset_to_lvalue(location, symbol.id, { type::t_struct, 0, 0, 0, false, false, false, 0, symbol.id });
-			exp.add_member_access(_codegen.get(), reinterpret_cast<uintptr_t>(symbol.function), symbol.type); // The member index was stored in the 'function' field
+			exp.reset_to_lvalue(location, symbol.id, { type::t_struct, 0, 0, 0, 0, symbol.id });
+			exp.add_member_access(symbol.uniform_index, symbol.type);
 		}
 		else if (symbol.op == symbol_type::variable)
 		{
@@ -1332,7 +1007,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 					case 'p': offsets[i] = 2, set[i] = stpq; break;
 					case 'q': offsets[i] = 3, set[i] = stpq; break;
 					default:
-						return error(location, 3018, "invalid subscript '" + subscript + "'"), false;
+						return error(location, 3018, "invalid subscript '" + subscript + '\''), false;
 					}
 
 					if (i > 0 && (set[i] != set[i - 1]))
@@ -1348,8 +1023,11 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 						}
 				}
 
-				// Add swizzle to current access chain
-				exp.add_swizzle_access(_codegen.get(), offsets, length);
+				// Indexing logic is simpler, so use that when possible
+				if (length == 1)
+					exp.add_static_index_access(_codegen.get(), offsets[0]);
+				else // Add swizzle to current access chain
+					exp.add_swizzle_access(offsets, length);
 
 				if (is_const || exp.type.has(type::q_uniform))
 					exp.type.qualifiers = (exp.type.qualifiers | type::q_const) & ~type::q_uniform;
@@ -1358,7 +1036,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 			{
 				const size_t length = subscript.size();
 				if (length < 3)
-					return error(location, 3018, "invalid subscript '" + subscript + "'"), false;
+					return error(location, 3018, "invalid subscript '" + subscript + '\''), false;
 
 				bool is_const = false;
 				signed char offsets[4] = { -1, -1, -1, -1 };
@@ -1368,7 +1046,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				for (size_t i = 0, j = 0; i < length; i += 3 + set, ++j)
 				{
 					if (subscript[i] != '_' || subscript[i + set + 1] < '0' + coefficient || subscript[i + set + 1] > '3' + coefficient || subscript[i + set + 2] < '0' + coefficient || subscript[i + set + 2] > '3' + coefficient)
-						return error(location, 3018, "invalid subscript '" + subscript + "'"), false;
+						return error(location, 3018, "invalid subscript '" + subscript + '\''), false;
 					if (set && subscript[i + 1] != 'm')
 						return error(location, 3018, "invalid subscript '" + subscript + "', mixed swizzle sets"), false;
 
@@ -1389,7 +1067,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				}
 
 				// Add swizzle to current access chain
-				exp.add_swizzle_access(_codegen.get(), offsets, length / (3 + set));
+				exp.add_swizzle_access(offsets, length / (3 + set));
 
 				if (is_const || exp.type.has(type::q_uniform))
 					exp.type.qualifiers = (exp.type.qualifiers | type::q_const) & ~type::q_uniform;
@@ -1399,7 +1077,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				const auto &member_list = _codegen->find_struct(exp.type.definition).member_list;
 
 				// Find member with matching name is structure definition
-				size_t member_index = 0;
+				uint32_t member_index = 0;
 				for (const struct_member_info &member : member_list) {
 					if (member.name == subscript)
 						break;
@@ -1407,10 +1085,10 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				}
 
 				if (member_index >= member_list.size())
-					return error(location, 3018, "invalid subscript '" + subscript + "'"), false;
+					return error(location, 3018, "invalid subscript '" + subscript + '\''), false;
 
 				// Add field index to current access chain
-				exp.add_member_access(_codegen.get(), member_index, member_list[member_index].type);
+				exp.add_member_access(member_index, member_list[member_index].type);
 
 				if (exp.type.has(type::q_uniform)) // Member access to uniform structure is not modifiable
 					exp.type.qualifiers = (exp.type.qualifiers | type::q_const) & ~type::q_uniform;
@@ -1423,7 +1101,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 
 				for (size_t i = 0; i < length; ++i)
 					if ((subscript[i] != 'x' && subscript[i] != 'r' && subscript[i] != 's') || i > 3)
-						return error(location, 3018, "invalid subscript '" + subscript + "'"), false;
+						return error(location, 3018, "invalid subscript '" + subscript + '\''), false;
 
 				// Promote scalar to vector type using cast
 				auto target_type = exp.type;
@@ -1433,7 +1111,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 			}
 			else
 			{
-				error(location, 3018, "invalid subscript '" + subscript + "'");
+				error(location, 3018, "invalid subscript '" + subscript + '\'');
 				return false;
 			}
 		}
@@ -1493,24 +1171,24 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 		{
 			#pragma region Binary Expression
 #if RESHADEFX_SHORT_CIRCUIT
-			const auto merge_label = _codegen->make_id();
-			const auto lhs_block_label = _codegen->current_block();
-			const auto rhs_block_label = _codegen->make_id();
+			codegen::id lhs_block = 0;
+			codegen::id rhs_block = 0;
+			codegen::id merge_block = 0;
 
+			// Switch block to a new one before parsing right-hand side value in case it needs to be skipped during short-circuiting
 			if (op == tokenid::ampersand_ampersand || op == tokenid::pipe_pipe)
 			{
-				_codegen->enter_block(rhs_block_label);
+				lhs_block = _codegen->set_block(0);
+				rhs_block = _codegen->create_block();
+				merge_block = _codegen->create_block();
+
+				_codegen->enter_block(rhs_block);
 			}
 #endif
-
 			// Parse the right hand side of the binary operation
 			expression rhs;
 			if (!parse_expression_multary(rhs, right_precedence))
 				return false;
-
-#if RESHADEFX_SHORT_CIRCUIT
-			_codegen->set_block(lhs_block_label);
-#endif
 
 			// Deduce the result base type based on implicit conversion rules
 			type type = type::merge(lhs.type, rhs.type);
@@ -1559,10 +1237,16 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 			lhs.add_cast_operation(type);
 			rhs.add_cast_operation(type);
 
+#if RESHADEFX_SHORT_CIRCUIT
+			// Reset block to left-hand side since the load of the left-hand side value has to happen in there
+			if (op == tokenid::ampersand_ampersand || op == tokenid::pipe_pipe)
+				_codegen->set_block(lhs_block);
+#endif
+
 			// Constant expressions can be evaluated at compile time
 			if (lhs.is_constant && rhs.is_constant)
 			{
-				lhs.reset_to_rvalue_constant(lhs.location, evaluate_constant_expression(op, type, lhs.constant, rhs.constant), type);
+				lhs.evaluate_constant_expression(op, rhs.constant);
 				continue;
 			}
 
@@ -1572,26 +1256,22 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 			// Short circuit for logical && and || operators
 			if (op == tokenid::ampersand_ampersand || op == tokenid::pipe_pipe)
 			{
-				if (op == tokenid::ampersand_ampersand)
-				{
-					// Emit "if ( lhs) result = rhs" for && expression
-					_codegen->leave_block_and_branch_conditional(lhs_value, rhs_block_label, merge_label);
-				}
-				else
-				{
-					// Emit "if (!lhs) result = rhs" for || expression
-					const auto not_lhs_value = _codegen->emit_unary_op(lhs.location, tokenid::exclaim, type, lhs_value);
-					_codegen->leave_block_and_branch_conditional(not_lhs_value, rhs_block_label, merge_label);
-				}
+				// Emit "if ( lhs) result = rhs" for && expression
+				codegen::id condition_value = lhs_value;
+				// Emit "if (!lhs) result = rhs" for || expression
+				if (op == tokenid::pipe_pipe)
+					condition_value = _codegen->emit_unary_op(lhs.location, tokenid::exclaim, type, lhs_value);
 
-				_codegen->set_block(rhs_block_label);
+				_codegen->leave_block_and_branch_conditional(condition_value, rhs_block, merge_block);
+
+				_codegen->set_block(rhs_block);
 				// Only load value of right hand side expression after entering the second block
 				const auto rhs_value = _codegen->emit_load(rhs);
-				_codegen->leave_block_and_branch(merge_label);
+				_codegen->leave_block_and_branch(merge_block);
 
-				_codegen->enter_block(merge_label);
+				_codegen->enter_block(merge_block);
 
-				const auto result_value = _codegen->emit_phi(type, lhs_value, lhs_block_label, rhs_value, rhs_block_label);
+				const auto result_value = _codegen->emit_phi(lhs.location, condition_value, lhs_block, rhs_value, rhs_block, lhs_value, lhs_block, type);
 
 				lhs.reset_to_rvalue(lhs.location, result_value, type);
 				continue;
@@ -1616,12 +1296,13 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 				return error(lhs.location, 3022, "boolean or vector expression expected"), false;
 
 #if RESHADEFX_SHORT_CIRCUIT
-			const auto prev_label = _codegen->current_block();
-			const auto merge_label = _codegen->make_id();
-			const auto true_block_label = _codegen->make_id();
-			const auto false_block_label = _codegen->make_id();
+			// Switch block to a new one before parsing first part in case it needs to be skipped during short-circuiting
+			const codegen::id merge_block = _codegen->create_block();
+			const codegen::id condition_block = _codegen->set_block(0);
+			codegen::id true_block = _codegen->create_block();
+			codegen::id false_block = _codegen->create_block();
 
-			_codegen->enter_block(true_block_label);
+			_codegen->enter_block(true_block);
 #endif
 			// Parse the first part of the right hand side of the ternary operation
 			expression true_exp;
@@ -1632,15 +1313,14 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 				return false;
 
 #if RESHADEFX_SHORT_CIRCUIT
-			_codegen->enter_block(false_block_label);
+			// Switch block to a new one before parsing second part in case it needs to be skipped during short-circuiting
+			_codegen->set_block(0);
+			_codegen->enter_block(false_block);
 #endif
 			// Parse the second part of the right hand side of the ternary operation
 			expression false_exp;
 			if (!parse_expression_assignment(false_exp))
 				return false;
-#if RESHADEFX_SHORT_CIRCUIT
-			_codegen->set_block(prev_label);
-#endif
 
 			// Check that the condition dimension matches that of at least one side
 			if (lhs.type.is_vector() && lhs.type.rows != true_exp.type.rows && lhs.type.cols != true_exp.type.cols)
@@ -1658,7 +1338,13 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 			if (false_exp.type.components() > type.components())
 				warning(false_exp.location, 3206, "implicit truncation of vector type");
 
+#if RESHADEFX_SHORT_CIRCUIT
+			// Reset block to left-hand side since the load of the condition value has to happen in there
+			_codegen->set_block(condition_block);
+#else
+			// The conditional operator instruction expects the condition to be a boolean type
 			lhs.add_cast_operation({ type::t_bool, type.rows, 1 });
+#endif
 			true_exp.add_cast_operation(type);
 			false_exp.add_cast_operation(type);
 
@@ -1666,23 +1352,21 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 			const auto condition_value = _codegen->emit_load(lhs);
 
 #if RESHADEFX_SHORT_CIRCUIT
-			_codegen->leave_block_and_branch_conditional(condition_value, true_block_label, false_block_label);
+			_codegen->leave_block_and_branch_conditional(condition_value, true_block, false_block);
 
-			_codegen->set_block(true_block_label);
+			_codegen->set_block(true_block);
 			// Only load true expression value after entering the first block
 			const auto true_value = _codegen->emit_load(true_exp);
-			_codegen->leave_block_and_branch(merge_label);
+			true_block = _codegen->leave_block_and_branch(merge_block);
 
-			_codegen->set_block(false_block_label);
+			_codegen->set_block(false_block);
 			// Only load false expression value after entering the second block
 			const auto false_value = _codegen->emit_load(false_exp);
-			_codegen->leave_block_and_branch(merge_label);
+			false_block = _codegen->leave_block_and_branch(merge_block);
 
-			_codegen->emit_if(lhs.location, prev_label, true_block_label, false_block_label, merge_label, 0);
+			_codegen->enter_block(merge_block);
 
-			_codegen->enter_block(merge_label);
-
-			const auto result_value = _codegen->emit_phi(type, true_value, true_block_label, false_value, false_block_label);
+			const auto result_value = _codegen->emit_phi(lhs.location, condition_value, condition_block, true_value, true_block, false_value, false_block, type);
 #else
 			const auto true_value = _codegen->emit_load(true_exp);
 			const auto false_value = _codegen->emit_load(false_exp);
@@ -1750,7 +1434,7 @@ bool reshadefx::parser::parse_expression_assignment(expression &lhs)
 	return true;
 }
 
-bool reshadefx::parser::parse_annotations(std::unordered_map<std::string, std::string> &annotations)
+bool reshadefx::parser::parse_annotations(std::unordered_map<std::string, std::pair<type, constant>> &annotations)
 {
 	// Check if annotations exist and return early if none do
 	if (!accept('<'))
@@ -1768,31 +1452,12 @@ bool reshadefx::parser::parse_annotations(std::unordered_map<std::string, std::s
 
 		const auto name = std::move(_token.literal_as_string);
 
-		expression expression;
-
-		if (!expect('=') || !parse_expression_unary(expression) || !expect(';'))
+		if (expression expression; !expect('=') || !parse_expression_unary(expression) || !expect(';'))
 			return false; // Probably a syntax error, so abort parsing
-		else if (!expression.is_constant) {
-			error(expression.location, 3011, "value must be a literal expression");
-			parse_success = false; // Continue parsing annotations despite the error, since the syntax is still correct
-			continue;
-		}
-
-		switch (expression.type.base)
-		{
-		case type::t_int:
-			annotations[name] = std::to_string(expression.constant.as_int[0]);
-			break;
-		case type::t_uint:
-			annotations[name] = std::to_string(expression.constant.as_uint[0]);
-			break;
-		case type::t_float:
-			annotations[name] = std::to_string(expression.constant.as_float[0]);
-			break;
-		case type::t_string:
-			annotations[name] = expression.constant.string_data;
-			break;
-		}
+		else if (expression.is_constant)
+			annotations[name] = { expression.type, expression.constant };
+		else // Continue parsing annotations despite this not being a constant, since the syntax is still correct
+			error(expression.location, 3011, "value must be a literal expression"), parse_success = false;
 	}
 
 	return expect('>') && parse_success;
@@ -1846,10 +1511,9 @@ bool reshadefx::parser::parse_statement(bool scoped)
 		#pragma region If
 		if (accept(tokenid::if_))
 		{
-			const auto prev_label = _codegen->current_block();
-			const auto merge_label = _codegen->make_id();
-			const auto true_block_label = _codegen->make_id();
-			const auto false_block_label = _codegen->make_id();
+			codegen::id true_block = _codegen->create_block(); // Block which contains the statements executed when the condition is true
+			codegen::id false_block = _codegen->create_block(); // Block which contains the statements executed when the condition is false
+			const codegen::id merge_block = _codegen->create_block(); // Block that is executed after the branch re-merged with the current control flow
 
 			expression condition;
 			if (!expect('(') || !parse_expression(condition) || !expect(')'))
@@ -1860,32 +1524,30 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			// Load condition and convert to boolean value as required by 'OpBranchConditional'
 			condition.add_cast_operation({ type::t_bool, 1, 1 });
 
-			const auto condition_value = _codegen->emit_load(condition);
-
-			_codegen->emit_if(location, condition_value, prev_label, true_block_label, false_block_label, merge_label, selection_control);
-
-			_codegen->leave_block_and_branch_conditional(condition_value, true_block_label, false_block_label);
+			const codegen::id condition_value = _codegen->emit_load(condition);
+			const codegen::id condition_block = _codegen->leave_block_and_branch_conditional(condition_value, true_block, false_block);
 
 			{ // Then block of the if statement
-				_codegen->enter_block(true_block_label);
+				_codegen->enter_block(true_block);
 
 				if (!parse_statement(true))
 					return false;
 
-				_codegen->leave_block_and_branch(merge_label);
+				true_block = _codegen->leave_block_and_branch(merge_block);
 			}
 			{ // Else block of the if statement
-				_codegen->enter_block(false_block_label);
+				_codegen->enter_block(false_block);
 
 				if (accept(tokenid::else_) && !parse_statement(true))
 					return false;
 
-				_codegen->leave_block_and_branch(merge_label);
+				false_block = _codegen->leave_block_and_branch(merge_block);
 			}
 
-			//_codegen->emit_if(location, condition_value, prev_label, true_block_label, false_block_label, merge_label, selection_control);
+			_codegen->enter_block(merge_block);
 
-			_codegen->enter_block(merge_label);
+			// Emit structured control flow for an if statement and connect all basic blocks
+			_codegen->emit_if(location, condition_value, condition_block, true_block, false_block, selection_control);
 
 			return true;
 		}
@@ -1894,9 +1556,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 		#pragma region Switch
 		if (accept(tokenid::switch_))
 		{
-			const auto prev_label = _codegen->current_block();
-			const auto merge_label = _codegen->make_id();
-			auto default_label = merge_label; // The default case jumps to the end of the switch statement if not overwritten
+			const codegen::id merge_block = _codegen->create_block(); // Block that is executed after the switch re-merged with the current control flow
 
 			expression selector_exp;
 			if (!expect('(') || !parse_expression(selector_exp) || !expect(')'))
@@ -1904,33 +1564,32 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			else if (!selector_exp.type.is_scalar())
 				return error(selector_exp.location, 3019, "switch statement expression must evaluate to a scalar"), false;
 
-			// Load selector and convert to integral value as required by 'OpSwitch'
+			// Load selector and convert to integral value as required by switch instruction
 			selector_exp.add_cast_operation({ type::t_int, 1, 1 });
 
 			const auto selector_value = _codegen->emit_load(selector_exp);
-
-			_codegen->leave_block_and_switch(selector_value);
+			const auto selector_block = _codegen->leave_block_and_switch(selector_value, merge_block);
 
 			if (!expect('{'))
 				return false;
 
-			_loop_break_target_stack.push_back(merge_label);
+			_loop_break_target_stack.push_back(merge_block);
 			on_scope_exit _([this]() { _loop_break_target_stack.pop_back(); });
 
 			bool success = true;
-			unsigned int current_block = 0;
-			unsigned int num_case_labels = 0;
-			std::vector<unsigned int> case_literal_and_labels;
+			codegen::id default_label = merge_block; // The default case jumps to the end of the switch statement if not overwritten
+			codegen::id current_block = 0;
+			std::vector<codegen::id> case_literal_and_labels;
 
 			while (!peek('}') && !peek(tokenid::end_of_file))
 			{
 				if (peek(tokenid::case_) || peek(tokenid::default_))
 				{
-					current_block = _codegen->make_id();
+					current_block = _codegen->create_block();
 
 					// Handle fall-through case
-					if (num_case_labels != 0)
-						_codegen->leave_block_and_branch(current_block);
+					if (!case_literal_and_labels.empty() || default_label != merge_block)
+						_codegen->leave_block_and_branch(current_block, 3);
 
 					_codegen->enter_block(current_block);
 				}
@@ -1962,7 +1621,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 					else
 					{
 						// Check if the default label was already changed by a previous 'default' statement
-						if (default_label != merge_label)
+						if (default_label != merge_block)
 						{
 							error(_token.location, 3532, "duplicate default in switch statement");
 							success = false;
@@ -1973,8 +1632,6 @@ bool reshadefx::parser::parse_statement(bool scoped)
 
 					if (!expect(':'))
 						return consume_until('}'), false;
-
-					num_case_labels++;
 				}
 
 				// It is valid for no statement to follow if this is the last label in the switch body
@@ -1986,14 +1643,15 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			}
 
 			// May have left the switch body without an explicit 'break' at the end, so handle that case now
-			_codegen->leave_block_and_branch(merge_label);
+			_codegen->leave_block_and_branch(merge_block, 1);
 
-			if (num_case_labels == 0)
+			if (case_literal_and_labels.empty() && default_label == merge_block)
 				warning(location, 5002, "switch statement contains no 'case' or 'default' labels");
 
-			_codegen->emit_switch(location, selector_value, prev_label, default_label, case_literal_and_labels, merge_label, selection_control);
+			_codegen->enter_block(merge_block);
 
-			_codegen->enter_block(merge_label);
+			// Emit structured control flow for a switch statement and connect all basic blocks
+			_codegen->emit_switch(location, selector_value, selector_block, default_label, case_literal_and_labels, selection_control);
 
 			return expect('}') && success;
 		}
@@ -2028,28 +1686,24 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			if (!expect(';'))
 				return false;
 
-			const auto prev_label = _codegen->current_block();
-			const auto header_label = _codegen->make_id(); // Pointer to the loop merge instruction
-			const auto loop_label = _codegen->make_id(); // Pointer to the main loop body block
-			const auto merge_label = _codegen->make_id(); // Pointer to the end of the loop
-			const auto continue_label = _codegen->make_id(); // Pointer to the continue block
-			const auto condition_label = _codegen->make_id(); // Pointer to the condition check
-
+			const codegen::id merge_block = _codegen->create_block(); // Block that is executed after the loop
+			const codegen::id header_label = _codegen->create_block(); // Pointer to the loop merge instruction
+			const codegen::id continue_label = _codegen->create_block(); // Pointer to the continue block
+			codegen::id loop_block = _codegen->create_block(); // Pointer to the main loop body block
+			codegen::id condition_block = _codegen->create_block(); // Pointer to the condition check
 			codegen::id condition_value = 0;
 
 			// End current block by branching to the next label
-			_codegen->leave_block_and_branch(header_label);
+			const codegen::id prev_block = _codegen->leave_block_and_branch(header_label);
 
-			{ // Begin loop block
+			{ // Begin loop block (this header is used for explicit structured control flow)
 				_codegen->enter_block(header_label);
 
-				_codegen->emit_loop(location, condition_value, prev_label, header_label, condition_label, loop_label, continue_label, merge_label, loop_control);
-
-				_codegen->leave_block_and_branch(condition_label);
+				_codegen->leave_block_and_branch(condition_block);
 			}
 
 			{ // Parse condition block
-				_codegen->enter_block(condition_label);
+				_codegen->enter_block(condition_block);
 
 				if (expression condition; parse_expression(condition))
 				{
@@ -2061,11 +1715,11 @@ bool reshadefx::parser::parse_statement(bool scoped)
 
 					condition_value = _codegen->emit_load(condition);
 
-					_codegen->leave_block_and_branch_conditional(condition_value, loop_label, merge_label);
+					condition_block = _codegen->leave_block_and_branch_conditional(condition_value, loop_block, merge_block);
 				}
 				else // It is valid for there to be no condition expression
 				{
-					_codegen->leave_block_and_branch(loop_label);
+					condition_block = _codegen->leave_block_and_branch(loop_block);
 				}
 
 				if (!expect(';'))
@@ -2086,9 +1740,9 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			}
 
 			{ // Parse loop body block
-				_codegen->enter_block(loop_label);
+				_codegen->enter_block(loop_block);
 
-				_loop_break_target_stack.push_back(merge_label);
+				_loop_break_target_stack.push_back(merge_block);
 				_loop_continue_target_stack.push_back(continue_label);
 
 				const bool parse_success = parse_statement(false);
@@ -2099,13 +1753,14 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				if (!parse_success)
 					return false;
 
-				_codegen->leave_block_and_branch(continue_label);
+				loop_block = _codegen->leave_block_and_branch(continue_label);
 			}
 
-			//_codegen->emit_loop(location, condition_value, prev_label, header_label, condition_label, loop_label, continue_label, merge_label, loop_control);
-
 			// Add merge block label to the end of the loop
-			_codegen->enter_block(merge_label);
+			_codegen->enter_block(merge_block);
+
+			// Emit structured control flow for a loop statement and connect all basic blocks
+			_codegen->emit_loop(location, condition_value, prev_block, header_label, condition_block, loop_block, continue_label, loop_control);
 
 			return true;
 		}
@@ -2117,26 +1772,24 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			enter_scope();
 			on_scope_exit _([this]() { leave_scope(); });
 
-			const auto prev_label = _codegen->current_block();
-			const auto header_label = _codegen->make_id();
-			const auto loop_label = _codegen->make_id();
-			const auto merge_label = _codegen->make_id();
-			const auto continue_label = _codegen->make_id();
-			const auto condition_label = _codegen->make_id();
-
+			const codegen::id merge_block = _codegen->create_block();
+			const codegen::id header_label = _codegen->create_block();
+			const codegen::id continue_label = _codegen->create_block();
+			codegen::id loop_block = _codegen->create_block();
+			codegen::id condition_block = _codegen->create_block();
 			codegen::id condition_value = 0;
 
 			// End current block by branching to the next label
-			_codegen->leave_block_and_branch(header_label);
+			const codegen::id prev_block = _codegen->leave_block_and_branch(header_label);
 
 			{ // Begin loop block
 				_codegen->enter_block(header_label);
 
-				_codegen->leave_block_and_branch(loop_label);
+				_codegen->leave_block_and_branch(loop_block);
 			}
 
 			{ // Parse condition block
-				_codegen->enter_block(condition_label);
+				_codegen->enter_block(condition_block);
 
 				expression condition;
 				if (!expect('(') || !parse_expression(condition) || !expect(')'))
@@ -2149,13 +1802,13 @@ bool reshadefx::parser::parse_statement(bool scoped)
 
 				condition_value = _codegen->emit_load(condition);
 
-				_codegen->leave_block_and_branch_conditional(condition_value, loop_label, merge_label);
+				condition_block = _codegen->leave_block_and_branch_conditional(condition_value, loop_block, merge_block);
 			}
 
 			{ // Parse loop body block
-				_codegen->enter_block(loop_label);
+				_codegen->enter_block(loop_block);
 
-				_loop_break_target_stack.push_back(merge_label);
+				_loop_break_target_stack.push_back(merge_block);
 				_loop_continue_target_stack.push_back(continue_label);
 
 				const bool parse_success = parse_statement(false);
@@ -2166,7 +1819,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				if (!parse_success)
 					return false;
 
-				_codegen->leave_block_and_branch(continue_label);
+				loop_block = _codegen->leave_block_and_branch(continue_label);
 			}
 
 			{ // Branch back to the loop header in empty continue block
@@ -2175,10 +1828,11 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				_codegen->leave_block_and_branch(header_label);
 			}
 
-			_codegen->emit_loop(location, condition_value, prev_label, header_label, condition_label, loop_label, continue_label, merge_label, loop_control);
-
 			// Add merge block label to the end of the loop
-			_codegen->enter_block(merge_label);
+			_codegen->enter_block(merge_block);
+
+			// Emit structured control flow for a loop statement and connect all basic blocks
+			_codegen->emit_loop(location, condition_value, prev_block, header_label, condition_block, loop_block, continue_label, loop_control);
 
 			return true;
 		}
@@ -2187,27 +1841,25 @@ bool reshadefx::parser::parse_statement(bool scoped)
 		#pragma region DoWhile
 		if (accept(tokenid::do_))
 		{
-			const auto prev_label = _codegen->current_block();
-			const auto header_label = _codegen->make_id();
-			const auto loop_label = _codegen->make_id();
-			const auto merge_label = _codegen->make_id();
-			const auto continue_label = _codegen->make_id();
-
+			const codegen::id merge_block = _codegen->create_block();
+			const codegen::id header_label = _codegen->create_block();
+			const codegen::id continue_label = _codegen->create_block();
+			codegen::id loop_block = _codegen->create_block();
 			codegen::id condition_value = 0;
 
 			// End current block by branching to the next label
-			_codegen->leave_block_and_branch(header_label);
+			const codegen::id prev_block = _codegen->leave_block_and_branch(header_label);
 
 			{ // Begin loop block
 				_codegen->enter_block(header_label);
 
-				_codegen->leave_block_and_branch(loop_label);
+				_codegen->leave_block_and_branch(loop_block);
 			}
 
 			{ // Parse loop body block
-				_codegen->enter_block(loop_label);
+				_codegen->enter_block(loop_block);
 
-				_loop_break_target_stack.push_back(merge_label);
+				_loop_break_target_stack.push_back(merge_block);
 				_loop_continue_target_stack.push_back(continue_label);
 
 				const bool parse_success = parse_statement(true);
@@ -2218,7 +1870,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				if (!parse_success)
 					return false;
 
-				_codegen->leave_block_and_branch(continue_label);
+				loop_block = _codegen->leave_block_and_branch(continue_label);
 			}
 
 			{ // Continue block does the condition evaluation
@@ -2235,13 +1887,14 @@ bool reshadefx::parser::parse_statement(bool scoped)
 
 				condition_value = _codegen->emit_load(condition);
 
-				_codegen->leave_block_and_branch_conditional(condition_value, header_label, merge_label);
+				_codegen->leave_block_and_branch_conditional(condition_value, header_label, merge_block);
 			}
 
-			_codegen->emit_loop(location, condition_value, prev_label, header_label, 0, loop_label, continue_label, merge_label, loop_control);
-
 			// Add merge block label to the end of the loop
-			_codegen->enter_block(merge_label);
+			_codegen->enter_block(merge_block);
+
+			// Emit structured control flow for a loop statement and connect all basic blocks
+			_codegen->emit_loop(location, condition_value, prev_block, header_label, 0, loop_block, continue_label, loop_control);
 
 			return true;
 		}
@@ -2254,7 +1907,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				return error(location, 3518, "break must be inside loop"), false;
 
 			// Branch to the break target of the inner most loop on the stack
-			_codegen->leave_block_and_branch(_loop_break_target_stack.back());
+			_codegen->leave_block_and_branch(_loop_break_target_stack.back(), 1);
 
 			return expect(';');
 		}
@@ -2267,7 +1920,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 				return error(location, 3519, "continue must be inside loop"), false;
 
 			// Branch to the continue target of the inner most loop on the stack
-			_codegen->leave_block_and_branch(_loop_continue_target_stack.back());
+			_codegen->leave_block_and_branch(_loop_continue_target_stack.back(), 2);
 
 			return expect(';');
 		}
@@ -2276,7 +1929,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 		#pragma region Return
 		if (accept(tokenid::return_))
 		{
-			const type &ret_type = _codegen->current_function().return_type;
+			const type &ret_type = _current_return_type;
 
 			if (!peek(';'))
 			{
@@ -2315,7 +1968,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 			}
 			else
 			{
-				_codegen->leave_block_and_return(0);
+				_codegen->leave_block_and_return();
 			}
 
 			return expect(';');
@@ -2355,7 +2008,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 		return expect(';'); // A statement has to be terminated with a semicolon
 
 	// No token should come through here, since all statements and expressions should have been handled above, so this is an error in the syntax
-	error(_token_next.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token_next.id) + "'");
+	error(_token_next.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token_next.id) + '\'');
 
 	// Gracefully consume any remaining characters until the statement would usually end, so that parsing may continue despite the error
 	consume_until(';');
@@ -2480,7 +2133,7 @@ bool reshadefx::parser::parse_top()
 	else if (!accept(';')) // Ignore single semicolons in the source
 	{
 		consume(); // Unexpected token in source stream, consume and report an error about it
-		error(_token.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token.id) + "'");
+		error(_token.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token.id) + '\'');
 		return false;
 	}
 
@@ -2492,13 +2145,11 @@ bool reshadefx::parser::parse_struct()
 	const auto location = std::move(_token.location);
 
 	struct_info info;
-	info.definition = _codegen->make_id();
-
 	// The structure name is optional
 	if (accept(tokenid::identifier))
 		info.name = _token.literal_as_string;
 	else
-		info.name = "__anonymous_struct_" + std::to_string(location.line) + '_' + std::to_string(location.column);
+		info.name = "_anonymous_struct_" + std::to_string(location.line) + '_' + std::to_string(location.column);
 
 	info.unique_name = 'S' + current_scope().name + info.name;
 	std::replace(info.unique_name.begin(), info.unique_name.end(), ':', '_');
@@ -2560,13 +2211,13 @@ bool reshadefx::parser::parse_struct()
 		warning(location, 5001, "struct has no members");
 
 	// Define the structure now that information about all the member types was gathered
-	_codegen->define_struct(location, info);
+	const auto id = _codegen->define_struct(location, info);
 
 	// Insert the symbol into the symbol table
-	const symbol symbol = { symbol_type::structure, info.definition };
+	const symbol symbol = { symbol_type::structure, id };
 
 	if (!insert_symbol(info.name, symbol, true))
-		return error(location, 3003, "redefinition of '" + info.name + "'"), false;
+		return error(location, 3003, "redefinition of '" + info.name + '\''), false;
 
 	return expect('}');
 }
@@ -2578,21 +2229,18 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 	if (!expect('(')) // Functions always have a parameter list
 		return false;
 	if (type.qualifiers != 0)
-		return error(location, 3047, "function return type cannot have any qualifiers"), false;
+		return error(location, 3047, '\'' + name + "': function return type cannot have any qualifiers"), false;
 
 	function_info info;
-	info.definition = _codegen->make_id();
-	info.entry_block = _codegen->make_id();
-
 	info.name = name;
 	info.unique_name = 'F' + current_scope().name + name;
 	std::replace(info.unique_name.begin(), info.unique_name.end(), ':', '_');
 
 	info.return_type = type;
+	_current_return_type = info.return_type;
 
 	// Enter function scope
-	_codegen->enter_function(info.definition, type); enter_scope();
-	on_scope_exit _([this]() { leave_scope(); _codegen->leave_function(); });
+	enter_scope(); on_scope_exit _([this]() { leave_scope(); _codegen->leave_function(); });
 
 	while (!peek(')'))
 	{
@@ -2607,20 +2255,20 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 		if (!expect(tokenid::identifier))
 			return false;
 
-		param.name = _token.literal_as_string;
-		const auto param_location = _token.location;
+		param.name = std::move(_token.literal_as_string);
+		param.location = std::move(_token.location);
 
 		if (param.type.is_void())
-			return error(param_location, 3038, "function parameters cannot be void"), false;
+			return error(param.location, 3038, '\'' + param.name + "': function parameters cannot be void"), false;
 		if (param.type.has(type::q_extern))
-			return error(param_location, 3006, "function parameters cannot be declared 'extern'"), false;
+			return error(param.location, 3006, '\'' + param.name + "': function parameters cannot be declared 'extern'"), false;
 		if (param.type.has(type::q_static))
-			return error(param_location, 3007, "function parameters cannot be declared 'static'"), false;
+			return error(param.location, 3007, '\'' + param.name + "': function parameters cannot be declared 'static'"), false;
 		if (param.type.has(type::q_uniform))
-			return error(param_location, 3047, "function parameters cannot be declared 'uniform', consider placing in global scope instead"), false;
+			return error(param.location, 3047, '\'' + param.name + "': function parameters cannot be declared 'uniform', consider placing in global scope instead"), false;
 
 		if (param.type.has(type::q_out) && param.type.has(type::q_const))
-			return error(param_location, 3046, "output parameters cannot be declared 'const'"), false;
+			return error(param.location, 3046, '\'' + param.name + "': output parameters cannot be declared 'const'"), false;
 		else if (!param.type.has(type::q_out))
 			param.type.qualifiers |= type::q_in; // Function parameters are implicitly 'in' if not explicitly defined as 'out'
 
@@ -2638,13 +2286,6 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 			std::transform(param.semantic.begin(), param.semantic.end(), param.semantic.begin(), [](char c) { return static_cast<char>(toupper(c)); });
 		}
 
-		param.type.is_ptr = true;
-
-		const auto definition = _codegen->define_parameter(param_location, param);
-
-		if (!insert_symbol(param.name, { symbol_type::variable, definition, param.type }))
-			return error(param_location, 3003, "redefinition of '" + param.name + "'"), false;
-
 		info.parameter_list.push_back(std::move(param));
 	}
 
@@ -2657,7 +2298,7 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 		if (!expect(tokenid::identifier))
 			return false;
 		if (type.is_void())
-			return error(_token.location, 3076, "void function cannot have a semantic"), false;
+			return error(_token.location, 3076, '\'' + name + "': void function cannot have a semantic"), false;
 
 		info.return_semantic = std::move(_token.literal_as_string);
 		// Make semantic upper case to simplify comparison later on
@@ -2666,26 +2307,30 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 
 	// Check if this is a function declaration without a body
 	if (accept(';'))
-		return error(location, 3510, "function is missing an implementation"), false;
+		return error(location, 3510, '\'' + name + "': function is missing an implementation"), false;
 
 	// Define the function now that information about the declaration was gathered
-	_codegen->define_function(location, info);
+	const auto id = _codegen->define_function(location, info);
+
+	// Insert the function and parameter symbols into the symbol table
+	symbol symbol = { symbol_type::function, id, { type::t_function } };
+	symbol.function = &_codegen->find_function(id);
+
+	if (!insert_symbol(name, symbol, true))
+		return error(location, 3003, "redefinition of '" + name + '\''), false;
+
+	for (const auto &param : info.parameter_list)
+		if (!insert_symbol(param.name, { symbol_type::variable, param.definition, param.type }))
+			return error(param.location, 3003, "redefinition of '" + param.name + '\''), false;
 
 	// A function has to start with a new block
-	_codegen->enter_block(info.entry_block);
+	_codegen->enter_block(_codegen->create_block());
 
 	const bool parse_success = parse_statement_block(false);
 
 	// Add implicit return statement to the end of functions
 	if (_codegen->is_in_block())
-		_codegen->leave_block_and_return(0);
-
-	// Insert the symbol into the symbol table
-	symbol symbol = { symbol_type::function, info.definition, { type::t_function } };
-	symbol.function = &_codegen->find_function(info.definition);
-
-	if (!insert_symbol(name, symbol, true))
-		return error(location, 3003, "redefinition of '" + name + "'"), false;
+		_codegen->leave_block_and_return();
 
 	return parse_success;
 }
@@ -2695,9 +2340,9 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 	const auto location = std::move(_token.location);
 
 	if (type.is_void())
-		return error(location, 3038, "variables cannot be void"), false;
+		return error(location, 3038, '\'' + name + "': variables cannot be void"), false;
 	if (type.has(type::q_in) || type.has(type::q_out))
-		return error(location, 3055, "variables cannot be declared 'in' or 'out'"), false;
+		return error(location, 3055, '\'' + name + "': variables cannot be declared 'in' or 'out'"), false;
 
 	// Local and global variables have different requirements
 	if (global)
@@ -2707,34 +2352,34 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		{
 			// Global variables that are 'static' cannot be of another storage class
 			if (type.has(type::q_uniform))
-				return error(location, 3007, "uniform global variables cannot be declared 'static'"), false;
+				return error(location, 3007, '\'' + name + "': uniform global variables cannot be declared 'static'"), false;
 			// The 'volatile qualifier is only valid memory object declarations that are storage images or uniform blocks
 			if (type.has(type::q_volatile))
-				return error(location, 3008, "global variables cannot be declared 'volatile'"), false;
+				return error(location, 3008, '\'' + name + "': global variables cannot be declared 'volatile'"), false;
 		}
 		else
 		{
 			// Make all global variables 'uniform' by default, since they should be externally visible without the 'static' keyword
 			if (!type.has(type::q_uniform) && !(type.is_texture() || type.is_sampler()))
-				warning(location, 5000, "global variables are considered 'uniform' by default");
+				warning(location, 5000, '\'' + name + "': global variables are considered 'uniform' by default");
 
 			// Global variables that are not 'static' are always 'extern' and 'uniform'
 			type.qualifiers |= type::q_extern | type::q_uniform;
 
 			// It is invalid to make 'uniform' variables constant, since they can be modified externally
 			if (type.has(type::q_const))
-				return error(location, 3035, "variables which are 'uniform' cannot be declared 'const'"), false;
+				return error(location, 3035, '\'' + name + "': variables which are 'uniform' cannot be declared 'const'"), false;
 		}
 	}
 	else
 	{
 		if (type.has(type::q_extern))
-			return error(location, 3006, "local variables cannot be declared 'extern'"), false;
+			return error(location, 3006, '\'' + name + "': local variables cannot be declared 'extern'"), false;
 		if (type.has(type::q_uniform))
-			return error(location, 3047, "local variables cannot be declared 'uniform'"), false;
+			return error(location, 3047, '\'' + name + "': local variables cannot be declared 'uniform'"), false;
 
 		if (type.is_texture() || type.is_sampler())
-			return error(location, 3038, "local variables cannot be textures or samplers"), false;
+			return error(location, 3038, '\'' + name + "': local variables cannot be textures or samplers"), false;
 	}
 
 	// The variable name may be followed by an optional array size expression
@@ -2751,7 +2396,7 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		if (!expect(tokenid::identifier))
 			return false;
 		else if (!global) // Only global variables can have a semantic
-			return error(_token.location, 3043, "local variables cannot have semantics"), false;
+			return error(_token.location, 3043, '\'' + name + "': local variables cannot have semantics"), false;
 
 		semantic = std::move(_token.literal_as_string);
 		// Make semantic upper case to simplify comparison later on
@@ -2770,11 +2415,11 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 				return false;
 
 			if (global && !initializer.is_constant) // TODO: This could be resolved by initializing these at the beginning of the entry point
-				return error(initializer.location, 3011, "initial value must be a literal expression"), false;
+				return error(initializer.location, 3011, '\'' + name + "': initial value must be a literal expression"), false;
 
 			// Check type compatibility
 			if ((type.array_length >= 0 && initializer.type.array_length != type.array_length) || !type::rank(initializer.type, type))
-				return error(initializer.location, 3017, "initial value does not match variable type"), false;
+				return error(initializer.location, 3017, '\'' + name + "': initial value does not match variable type"), false;
 			if ((initializer.type.rows < type.rows || initializer.type.cols < type.cols) && !initializer.type.is_scalar())
 				return error(initializer.location, 3017, "cannot implicitly convert these vector types"), false;
 
@@ -2788,15 +2433,18 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 
 			initializer.add_cast_operation(type);
 		}
-		else if (type.is_numeric()) // Numeric variables without an initializer need special handling
+		else if (type.is_numeric() || type.is_struct()) // Numeric variables without an initializer need special handling
 		{
 			if (type.has(type::q_const)) // Constants have to have an initial value
-				return error(location, 3012, "missing initial value for '" + name + "'"), false;
+				return error(location, 3012, '\'' + name + "': missing initial value"), false;
 			else if (!type.has(type::q_uniform)) // Zero initialize all global variables
 				initializer.reset_to_rvalue_constant(location, {}, type);
 		}
 		else if (global && accept('{')) // Textures and samplers can have a property block attached to their declaration
 		{
+			if (type.has(type::q_const)) // Non-numeric variables cannot be constants
+				return error(location, 3035, '\'' + name + "': this variable type cannot be declared 'const'"), false;
+
 			while (!peek('}'))
 			{
 				if (!expect(tokenid::identifier))
@@ -2888,7 +2536,7 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 					else if (property_name == "MipLODBias" || property_name == "MipMapLodBias")
 						sampler_info.lod_bias = static_cast<float>(value);
 					else
-						return error(property_location, 3004, "unrecognized property '" + property_name + "'"), consume_until('}'), false;
+						return error(property_location, 3004, "unrecognized property '" + property_name + '\''), consume_until('}'), false;
 				}
 
 				if (!expect(';'))
@@ -2900,6 +2548,10 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		}
 	}
 
+	// At this point the array size should be known (either from the declaration or the initializer)
+	if (type.array_length < 0)
+		return error(location, 3074, '\'' + name + "': implicit array missing initial value"), false;
+
 	symbol symbol;
 
 	if (type.is_numeric() && type.has(type::q_const) && initializer.is_constant) // Variables with a constant initializer and constant type are named constants
@@ -2910,10 +2562,6 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 	else if (type.is_texture())
 	{
 		assert(global);
-
-		type.is_ptr = true; // Variables are always pointers
-
-		texture_info.id = _codegen->make_id();
 
 		// Add namespace scope to avoid name clashes
 		texture_info.unique_name = 'V' + current_scope().name + name;
@@ -2929,11 +2577,7 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		assert(global);
 
 		if (sampler_info.texture_name.empty())
-			return error(location, 3012, "missing 'Texture' property for '" + name + "'"), false;
-
-		type.is_ptr = true; // Variables are always pointers
-
-		sampler_info.id = _codegen->make_id();
+			return error(location, 3012, '\'' + name + "': missing 'Texture' property"), false;
 
 		// Add namespace scope to avoid name clashes
 		sampler_info.unique_name = 'V' + current_scope().name + name;
@@ -2963,14 +2607,12 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 
 		symbol = { symbol_type::uniform, 0, type };
 		symbol.id = _codegen->define_uniform(location, uniform_info);
+		symbol.uniform_index = uniform_info.member_index;
 
-		// Encode member index into symbol
-		symbol.function = reinterpret_cast<const function_info *>(static_cast<uintptr_t>(uniform_info.member_index));
+		assert(uniform_info.size != 0);
 	}
 	else // All other variables are separate entities
 	{
-		type.is_ptr = true; // Variables are always pointers
-
 		symbol = { symbol_type::variable, 0, type };
 
 		// Update global variable names to contain the namespace scope to avoid name clashes
@@ -2987,7 +2629,7 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		{
 			const auto initializer_value = _codegen->emit_load(initializer);
 
-			symbol.id = _codegen->define_variable(location, type, unique_name.c_str(), global, 0);
+			symbol.id = _codegen->define_variable(location, type, unique_name.c_str(), global);
 
 			if (initializer_value != 0)
 			{
@@ -3002,7 +2644,7 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 
 	// Insert the symbol into the symbol table
 	if (!insert_symbol(name, symbol, global))
-		return error(location, 3003, "redefinition of '" + name + "'"), false;
+		return error(location, 3003, "redefinition of '" + name + '\''), false;
 
 	return true;
 }
@@ -3011,8 +2653,6 @@ bool reshadefx::parser::parse_technique()
 {
 	if (!expect(tokenid::identifier))
 		return false;
-
-	const auto location = std::move(_token.location);
 
 	technique_info info;
 	info.name = std::move(_token.literal_as_string);
@@ -3028,7 +2668,7 @@ bool reshadefx::parser::parse_technique()
 			return consume_until('}'), false;
 	}
 
-	_codegen->define_technique(location, info);
+	_codegen->define_technique(info);
 
 	return expect('}');
 }
@@ -3108,13 +2748,12 @@ bool reshadefx::parser::parse_technique_pass(pass_info &info)
 				function_info &function_info = _codegen->find_function(symbol.id);
 
 				// We potentially need to generate a special entry point function which translates between function parameters and input/output variables
-				if (function_info.entry_point == 0)
-					function_info.entry_point = _codegen->create_entry_point(function_info, is_ps);
+				_codegen->create_entry_point(function_info, is_ps);
 
 				if (is_vs)
-					info.vs_entry_point = function_info.name;
+					info.vs_entry_point = function_info.unique_name;
 				if (is_ps)
-					info.ps_entry_point = function_info.name;
+					info.ps_entry_point = function_info.unique_name;
 			}
 			else
 			{
@@ -3206,7 +2845,7 @@ bool reshadefx::parser::parse_technique_pass(pass_info &info)
 			else if (state == "StencilZFail" || state == "StencilDepthFail" || state == "StencilDepthFailOp")
 				info.stencil_op_depth_fail = value;
 			else
-				return error(location, 3004, "unrecognized pass state '" + state + "'"), consume_until('}'), false;
+				return error(location, 3004, "unrecognized pass state '" + state + '\''), consume_until('}'), false;
 		}
 
 		if (!expect(';'))

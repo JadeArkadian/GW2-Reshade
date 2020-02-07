@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "effect_types.hpp"
+#include "effect_expression.hpp"
 
 namespace reshadefx
 {
@@ -18,6 +18,9 @@ namespace reshadefx
 		unsigned int level, namespace_level;
 	};
 
+	/// <summary>
+	/// Enumeration of all possible symbol types
+	/// </summary>
 	enum class symbol_type
 	{
 		invalid,
@@ -34,11 +37,16 @@ namespace reshadefx
 	/// </summary>
 	struct symbol
 	{
-		symbol_type op;
-		unsigned int id;
+		symbol_type op = symbol_type::invalid;
+		uint32_t id = 0;
 		type type = {};
 		constant constant = {};
-		const function_info *function = nullptr;
+
+		union
+		{
+			const function_info *function = nullptr;
+			uint32_t uniform_index;
+		};
 	};
 
 	/// <summary>

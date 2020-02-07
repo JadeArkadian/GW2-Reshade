@@ -576,7 +576,7 @@ namespace reshade::d3d9
 	}
 	bool d3d9_runtime::load_effect(const reshadefx::module &module, std::string &errors)
 	{
-		return d3d9_effect_compiler(this, module, errors, false).run();
+		return d3d9_effect_compiler(this, module, errors).run();
 	}
 	bool d3d9_runtime::update_texture(texture &texture, const uint8_t *data)
 	{
@@ -750,8 +750,8 @@ namespace reshade::d3d9
 			D3DVIEWPORT9 viewport;
 			_device->GetViewport(&viewport);
 
-			//const float texelsize[4] = { -1.0f / viewport.Width, 1.0f / viewport.Height };
-			//_device->SetVertexShaderConstantF(255, texelsize, 1);
+			const float texelsize[4] = { -1.0f / viewport.Width, 1.0f / viewport.Height };
+			_device->SetVertexShaderConstantF(255, texelsize, 1);
 
 			const bool is_viewport_sized = viewport.Width == _width && viewport.Height == _height;
 
