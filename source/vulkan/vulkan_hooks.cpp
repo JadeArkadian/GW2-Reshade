@@ -145,6 +145,7 @@ VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo *pCreateInfo, co
 	dispatch_table.DestroyInstance = (PFN_vkDestroyInstance)gipa(instance, "vkDestroyInstance");
 	dispatch_table.EnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)gipa(instance, "vkEnumeratePhysicalDevices");
 	dispatch_table.GetPhysicalDeviceFormatProperties = (PFN_vkGetPhysicalDeviceFormatProperties)gipa(instance, "vkGetPhysicalDeviceFormatProperties");
+	dispatch_table.GetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)gipa(instance, "vkGetPhysicalDeviceProperties");
 	dispatch_table.GetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)gipa(instance, "vkGetPhysicalDeviceMemoryProperties");
 	dispatch_table.GetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)gipa(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
 	dispatch_table.EnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)gipa(instance, "vkEnumerateDeviceExtensionProperties");
@@ -254,8 +255,15 @@ VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDevi
 		queue_family_index = pCreateInfo->pQueueCreateInfos[i].queueFamilyIndex;
 		assert(queue_family_index < num_queue_families);
 
+		// Find the first queue family which supports graphics and has at least one queue
 		if (pCreateInfo->pQueueCreateInfos[i].queueCount > 0 && (queue_families[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0)
+		{
+			if (pCreateInfo->pQueueCreateInfos[i].pQueuePriorities[0] < 1.0f)
+				LOG(WARN) << "Vulkan queue used for rendering has a low priority (" << pCreateInfo->pQueueCreateInfos[i].pQueuePriorities[0] << ").";
+
 			graphics_queue_family_index = queue_family_index;
+			break;
+		}
 	}
 
 	VkPhysicalDeviceFeatures enabled_features = {};
@@ -270,6 +278,15 @@ VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDevi
 	enabled_extensions.reserve(pCreateInfo->enabledExtensionCount);
 	for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
 		enabled_extensions.push_back(pCreateInfo->ppEnabledExtensionNames[i]);
+
+	// Check if the device is used for presenting
+	if (std::find_if(enabled_extensions.begin(), enabled_extensions.end(),
+		[](const char *name) { return strcmp(name, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0; }) == enabled_extensions.end())
+	{
+		LOG(WARN) << "Skipping device because it was not created with the \"" VK_KHR_SWAPCHAIN_EXTENSION_NAME "\" extension.";
+
+		graphics_queue_family_index  = std::numeric_limits<uint32_t>::max();
+	}
 
 	// Only have to enable additional features if there is a graphics queue, since ReShade will not run otherwise
 	if (graphics_queue_family_index != std::numeric_limits<uint32_t>::max())
@@ -629,8 +646,7 @@ VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *pPr
 			runtime != nullptr)
 		{
 			VkSemaphore signal = VK_NULL_HANDLE;
-			if (runtime->on_present(queue, pPresentInfo->pImageIndices[i], device_data.buffer_detection,
-				wait_semaphores.data(), static_cast<uint32_t>(wait_semaphores.size()), signal); signal != VK_NULL_HANDLE)
+			if (runtime->on_present(pPresentInfo->pImageIndices[i], wait_semaphores.data(), static_cast<uint32_t>(wait_semaphores.size()), signal, device_data.buffer_detection); signal != VK_NULL_HANDLE)
 			{
 				// The queue submit in 'on_present' now waits on the requested wait semaphores
 				// The next queue submit should therefore wait on the semaphore that was signaled by the last 'on_present' submit

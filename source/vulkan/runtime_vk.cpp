@@ -8,6 +8,7 @@
 #include "runtime_vk.hpp"
 #include "runtime_config.hpp"
 #include "runtime_objects.hpp"
+#include "driver_bugs.hpp"
 #include "format_utils.hpp"
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -26,7 +27,6 @@ namespace reshade::vulkan
 		VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
 		VkBuffer ubo = VK_NULL_HANDLE;
 		VkDeviceMemory ubo_mem = VK_NULL_HANDLE;
-		reshadefx::module module;
 		std::vector<VkDescriptorImageInfo> image_bindings;
 		uint32_t depth_image_binding = std::numeric_limits<uint32_t>::max();
 	};
@@ -153,7 +153,11 @@ reshade::vulkan::runtime_vk::runtime_vk(VkDevice device, VkPhysicalDevice physic
 {
 	_renderer_id = 0x20000;
 
+	instance_table.GetPhysicalDeviceProperties(physical_device, &_device_props);
 	instance_table.GetPhysicalDeviceMemoryProperties(physical_device, &_memory_props);
+
+	_vendor_id = _device_props.vendorID;
+	_device_id = _device_props.deviceID;
 
 	const VkFormat possible_stencil_formats[] = {
 		VK_FORMAT_S8_UINT,
@@ -175,8 +179,22 @@ reshade::vulkan::runtime_vk::runtime_vk(VkDevice device, VkPhysicalDevice physic
 		}
 	}
 
-#if RESHADE_GUI && RESHADE_DEPTH
-	subscribe_to_ui("Vulkan", [this]() { draw_depth_debug_menu(); });
+	// Get the main graphics queue for command submission
+	// There has to be at least one queue, or else this runtime would not have been created with this queue family index
+	// So it is safe to just get the first one
+	vk.GetDeviceQueue(_device, _queue_family_index, 0, &_queue);
+	assert(_queue != VK_NULL_HANDLE);
+
+#if RESHADE_GUI
+	subscribe_to_ui("Vulkan", [this]() {
+		// Add some information about the device and driver to the UI
+		ImGui::Text("Vulkan %u.%u.%u", VK_VERSION_MAJOR(_device_props.apiVersion), VK_VERSION_MINOR(_device_props.apiVersion), VK_VERSION_PATCH(_device_props.apiVersion));
+		ImGui::Text("%s Driver %u.%u", _device_props.deviceName, VK_VERSION_MAJOR(_device_props.driverVersion), VK_VERSION_MINOR(_device_props.driverVersion));
+
+#if RESHADE_DEPTH
+		draw_depth_debug_menu();
+#endif
+	});
 #endif
 #if RESHADE_DEPTH
 	subscribe_to_load_config([this](const ini_file &config) {
@@ -190,9 +208,6 @@ reshade::vulkan::runtime_vk::runtime_vk(VkDevice device, VkPhysicalDevice physic
 
 bool reshade::vulkan::runtime_vk::on_init(VkSwapchainKHR swapchain, const VkSwapchainCreateInfoKHR &desc, HWND hwnd)
 {
-	// Update swapchain to the new one
-	_swapchain = swapchain;
-
 	RECT window_rect = {};
 	GetClientRect(hwnd, &window_rect);
 
@@ -202,6 +217,9 @@ bool reshade::vulkan::runtime_vk::on_init(VkSwapchainKHR swapchain, const VkSwap
 	_window_height = window_rect.bottom - window_rect.top;
 	_color_bit_depth = desc.imageFormat >= VK_FORMAT_A2R10G10B10_UNORM_PACK32 && desc.imageFormat <= VK_FORMAT_A2B10G10R10_SINT_PACK32 ? 10 : 8;
 	_backbuffer_format = desc.imageFormat;
+
+	if (_queue == VK_NULL_HANDLE)
+		return false;
 
 	// Create back buffer shader image
 	assert(_backbuffer_format != VK_FORMAT_UNDEFINED);
@@ -282,9 +300,9 @@ bool reshade::vulkan::runtime_vk::on_init(VkSwapchainKHR swapchain, const VkSwap
 
 	// Get back buffer images
 	uint32_t num_images = 0;
-	check_result(vk.GetSwapchainImagesKHR(_device, _swapchain, &num_images, nullptr)) false;
+	check_result(vk.GetSwapchainImagesKHR(_device, swapchain, &num_images, nullptr)) false;
 	_swapchain_images.resize(num_images);
-	check_result(vk.GetSwapchainImagesKHR(_device, _swapchain, &num_images, _swapchain_images.data())) false;
+	check_result(vk.GetSwapchainImagesKHR(_device, swapchain, &num_images, _swapchain_images.data())) false;
 
 	assert(desc.imageUsage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 	_render_area = desc.imageExtent;
@@ -341,10 +359,8 @@ bool reshade::vulkan::runtime_vk::on_init(VkSwapchainKHR swapchain, const VkSwap
 		_cmd_buffers[i].first = cmd_buffers[i];
 		_cmd_buffers[i].second = false; // Command buffers are in initial state
 
-#ifdef _DEBUG
 		// The validation layers expect the loader to have set the dispatch pointer, but this does not happen when calling down the chain, so fix it here
 		*reinterpret_cast<void **>(cmd_buffers[i]) = *reinterpret_cast<void **>(_device);
-#endif
 
 		VkFenceCreateInfo create_info { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 		create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT; // Create signaled so first status check in 'on_present' succeeds
@@ -504,7 +520,7 @@ void reshade::vulkan::runtime_vk::on_reset()
 	_allocations.clear();
 }
 
-void reshade::vulkan::runtime_vk::on_present(VkQueue queue, uint32_t swapchain_image_index, buffer_detection_context &tracker, const VkSemaphore *wait, uint32_t num_wait, VkSemaphore &signal)
+void reshade::vulkan::runtime_vk::on_present(uint32_t swapchain_image_index, const VkSemaphore *wait, uint32_t num_wait, VkSemaphore &signal, buffer_detection_context &tracker)
 {
 	if (!_is_initialized)
 		return;
@@ -560,7 +576,8 @@ void reshade::vulkan::runtime_vk::on_present(VkQueue queue, uint32_t swapchain_i
 		// Only reset fence before an actual submit which can signal it again
 		vk.ResetFences(_device, 1, &fence);
 
-		if (vk.QueueSubmit(queue, 1, &submit_info, fence) != VK_SUCCESS)
+		// Always submit to the graphics queue
+		if (vk.QueueSubmit(_queue, 1, &submit_info, fence) != VK_SUCCESS)
 			// Semaphore is not signaled if queue submission fails
 			signal = VK_NULL_HANDLE;
 
@@ -662,14 +679,46 @@ bool reshade::vulkan::runtime_vk::init_effect(size_t index)
 {
 	effect &effect = _effects[index];
 
-	vk_handle<VK_OBJECT_TYPE_SHADER_MODULE> module(_device, vk);
-
 	// Load shader module
-	{   VkShaderModuleCreateInfo create_info { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-		create_info.codeSize = effect.module.spirv.size() * sizeof(uint32_t);
-		create_info.pCode = effect.module.spirv.data();
+	std::unordered_map<std::string, VkShaderModule> entry_points;
+	std::vector<vk_handle<VK_OBJECT_TYPE_SHADER_MODULE>> shader_modules;
 
-		const VkResult res = vk.CreateShaderModule(_device, &create_info, nullptr, &module);
+	{   VkResult res = VK_SUCCESS;
+
+		/* The AMD Vulkan driver has issues with multiple entry points in a single shader module, so
+		 * instead create a separate shader module for every entry point there.
+		 * See also driver_bugs.hpp for a more detailed description of the problem.
+		 */
+		bool has_driver_bug = (_device_props.vendorID == 0x1002 /*AMD*/);
+
+		if (!has_driver_bug)
+		{
+			VkShaderModuleCreateInfo create_info { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+			create_info.codeSize = effect.module.spirv.size() * sizeof(uint32_t);
+			create_info.pCode = effect.module.spirv.data();
+
+			res = vk.CreateShaderModule(_device, &create_info, nullptr, &shader_modules.emplace_back(_device, vk));
+		}
+
+		for (size_t i = 0; i < effect.module.entry_points.size() && res == VK_SUCCESS; ++i)
+		{
+			const reshadefx::entry_point &entry_point = effect.module.entry_points[i];
+
+			if (has_driver_bug)
+			{
+				std::vector<uint32_t> spirv = effect.module.spirv;
+				work_around_amd_driver_bug(spirv, entry_point.name);
+
+				VkShaderModuleCreateInfo create_info { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+				create_info.codeSize = spirv.size() * sizeof(uint32_t);
+				create_info.pCode = spirv.data();
+
+				res = vk.CreateShaderModule(_device, &create_info, nullptr, &shader_modules.emplace_back(_device, vk));
+			}
+
+			entry_points[entry_point.name] = shader_modules.back();
+		}
+
 		if (res != VK_SUCCESS)
 		{
 			LOG(ERROR) << "Failed to create shader module. "
@@ -680,9 +729,7 @@ bool reshade::vulkan::runtime_vk::init_effect(size_t index)
 
 	if (_effect_data.size() <= index)
 		_effect_data.resize(index + 1);
-
 	vulkan_effect_data &effect_data = _effect_data[index];
-	effect_data.module = effect.module;
 
 	// Create query pool for time measurements
 	{   VkQueryPoolCreateInfo create_info { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
@@ -1105,12 +1152,12 @@ bool reshade::vulkan::runtime_vk::init_effect(size_t index)
 			VkPipelineShaderStageCreateInfo stages[2];
 			stages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 			stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-			stages[0].module = module;
+			stages[0].module = entry_points.at(pass_info.vs_entry_point);
 			stages[0].pName = pass_info.vs_entry_point.c_str();
 			stages[0].pSpecializationInfo = &spec_info;
 			stages[1] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 			stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-			stages[1].module = module;
+			stages[1].module = entry_points.at(pass_info.ps_entry_point);
 			stages[1].pName = pass_info.ps_entry_point.c_str();
 			stages[1].pSpecializationInfo = &spec_info;
 
@@ -1598,12 +1645,8 @@ void reshade::vulkan::runtime_vk::execute_command_buffer() const
 	submit_info.commandBufferCount = 1;
 	submit_info.pCommandBuffers = &cmd_info.first;
 
-	// Can use the main graphics queue here, since it is immediately synchronized with the host again anyway
-	VkQueue queue = VK_NULL_HANDLE;
-	vk.GetDeviceQueue(_device, _queue_family_index, 0, &queue);
-
 	const VkFence fence = _cmd_fences[NUM_COMMAND_FRAMES]; // Use special fence reserved for synchronous execution
-	if (vk.QueueSubmit(queue, 1, &submit_info, fence) == VK_SUCCESS)
+	if (vk.QueueSubmit(_queue, 1, &submit_info, fence) == VK_SUCCESS)
 	{
 		// Wait for the submitted work to finish and reset fence again for next use
 		vk.WaitForFences(_device, 1, &fence, VK_TRUE, UINT64_MAX); vk.ResetFences(_device, 1, &fence);
