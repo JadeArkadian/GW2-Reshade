@@ -253,20 +253,20 @@ namespace reshade
 			{
 				switch (variable.basetype)
 				{
-					case uniform_datatype::boolean:
+					case reshadefx::type::t_bool:
 					{
 						const bool even = (_framecount % 2) == 0;
 						set_uniform_value(variable, &even, 1);
 						break;
 					}
-					case uniform_datatype::signed_integer:
-					case uniform_datatype::unsigned_integer:
+					case reshadefx::type::t_int:
+					case reshadefx::type::t_uint:
 					{
 						const unsigned int framecount = static_cast<unsigned int>(_framecount % UINT_MAX);
 						set_uniform_value(variable, &framecount, 1);
 						break;
 					}
-					case uniform_datatype::floating_point:
+					case reshadefx::type::t_float:
 					{
 						const float framecount = static_cast<float>(_framecount % 16777216);
 						set_uniform_value(variable, &framecount, 1);
@@ -319,20 +319,20 @@ namespace reshade
 
 				switch (variable.basetype)
 				{
-					case uniform_datatype::boolean:
+					case reshadefx::type::t_bool:
 					{
 						const bool even = (timer % 2) == 0;
 						set_uniform_value(variable, &even, 1);
 						break;
 					}
-					case uniform_datatype::signed_integer:
-					case uniform_datatype::unsigned_integer:
+					case reshadefx::type::t_int:
+					case reshadefx::type::t_uint:
 					{
 						const unsigned int timer_int = static_cast<unsigned int>(timer % UINT_MAX);
 						set_uniform_value(variable, &timer_int, 1);
 						break;
 					}
-					case uniform_datatype::floating_point:
+					case reshadefx::type::t_float:
 					{
 						const float timer_float = std::fmod(static_cast<float>(timer * 1e-6f), 16777216.0f);
 						set_uniform_value(variable, &timer_float, 1);
@@ -475,8 +475,7 @@ namespace reshade
 
 		_effect_files.clear();
 
-		// Clear log on reload so that errors disappear from the splash screen
-		reshade::log::lines.clear();
+		_last_reload_successful = true;
 
 		std::vector<std::string> fastloading_filenames;
 
@@ -529,86 +528,101 @@ namespace reshade
 	{
 		LOG(INFO) << "Compiling " << path << " ...";
 
-		reshadefx::preprocessor pp;
-
-		if (path.is_absolute())
-		{
-			pp.add_include_path(path.parent_path());
-		}
-
-		for (const auto &include_path : _effect_search_paths)
-		{
-			if (include_path.empty())
-			{
-				continue;
-			}
-
-			pp.add_include_path(include_path);
-		}
-
-		pp.add_macro_definition("__RESHADE__", std::to_string(VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + VERSION_REVISION));
-		pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", _performance_mode ? "1" : "0");
-		pp.add_macro_definition("__VENDOR__", std::to_string(_vendor_id));
-		pp.add_macro_definition("__DEVICE__", std::to_string(_device_id));
-		pp.add_macro_definition("__RENDERER__", std::to_string(_renderer_id));
-		pp.add_macro_definition("__APPLICATION__", std::to_string(std::hash<std::string>()(s_target_executable_path.filename_without_extension().string())));
-		pp.add_macro_definition("BUFFER_WIDTH", std::to_string(_width));
-		pp.add_macro_definition("BUFFER_HEIGHT", std::to_string(_height));
-		pp.add_macro_definition("BUFFER_RCP_WIDTH", std::to_string(1.0f / static_cast<float>(_width)));
-		pp.add_macro_definition("BUFFER_RCP_HEIGHT", std::to_string(1.0f / static_cast<float>(_height)));
-
-		for (const auto &definition : _preprocessor_definitions)
-		{
-			if (definition.empty())
-			{
-				continue;
-			}
-
-			const size_t equals_index = definition.find_first_of('=');
-
-			if (equals_index != std::string::npos)
-			{
-				pp.add_macro_definition(definition.substr(0, equals_index), definition.substr(equals_index + 1));
-			}
-			else
-			{
-				pp.add_macro_definition(definition);
-			}
-		}
-
-		if (!pp.run(path))
-		{
-			LOG(ERROR) << "Failed to preprocess " << path << ":\n" << pp.errors();
-			return;
-		}
-
-		reshadefx::codegen::backend backend = reshadefx::codegen::backend::hlsl;
-		unsigned shader_model = 50;
-		if (_renderer_id < 0xa000)
-			shader_model = 30;
-		else if (_renderer_id < 0xa100)
-			shader_model = 40;
-		else if (_renderer_id < 0xb000)
-			shader_model = 41;
-		else
-			shader_model = 50;
-		if (_renderer_id & 0x10000)
-			backend = reshadefx::codegen::backend::glsl;
-
-		reshadefx::parser parser(backend, shader_model, true);
-
-		if (!parser.parse(pp.current_output()))
-		{
-			LOG(ERROR) << "Failed to compile " << path << ":\n" << parser.errors();
-			return;
-		}
-
-		// TODO: Performance mode?
-
+		std::string source_code, errors;
 		reshadefx::module module;
-		parser.write_result(module);
 
-		std::string errors = parser.errors();
+		{ reshadefx::preprocessor pp;
+
+			if (path.is_absolute())
+				pp.add_include_path(path.parent_path());
+
+			for (const auto &include_path : _effect_search_paths)
+			{
+				if (include_path.empty())
+					continue;
+
+				pp.add_include_path(include_path);
+			}
+
+			pp.add_macro_definition("__RESHADE__", std::to_string(VERSION_MAJOR * 10000 + VERSION_MINOR * 100 + VERSION_REVISION));
+			pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", _performance_mode ? "1" : "0");
+			pp.add_macro_definition("__VENDOR__", std::to_string(_vendor_id));
+			pp.add_macro_definition("__DEVICE__", std::to_string(_device_id));
+			pp.add_macro_definition("__RENDERER__", std::to_string(_renderer_id));
+			pp.add_macro_definition("__APPLICATION__", std::to_string(std::hash<std::string>()(s_target_executable_path.filename_without_extension().string())));
+			pp.add_macro_definition("BUFFER_WIDTH", std::to_string(_width));
+			pp.add_macro_definition("BUFFER_HEIGHT", std::to_string(_height));
+			pp.add_macro_definition("BUFFER_RCP_WIDTH", std::to_string(1.0f / static_cast<float>(_width)));
+			pp.add_macro_definition("BUFFER_RCP_HEIGHT", std::to_string(1.0f / static_cast<float>(_height)));
+
+			for (const auto &definition : _preprocessor_definitions)
+			{
+				if (definition.empty())
+					continue;
+
+				if (const size_t equals_index = definition.find_first_of('='); equals_index != std::string::npos)
+					pp.add_macro_definition(definition.substr(0, equals_index), definition.substr(equals_index + 1));
+				else
+					pp.add_macro_definition(definition);
+			}
+
+			if (!pp.append_file(path))
+			{
+				LOG(ERROR) << "Failed to pre-process " << path << ":\n" << pp.errors();
+				_last_reload_successful = false;
+				return;
+			}
+
+			errors = std::move(pp.errors()); // Append any pre-processor warnings to the error list
+			source_code = std::move(pp.output());
+		}
+
+		{ reshadefx::parser parser;
+
+			unsigned shader_model;
+			if (_renderer_id < 0xa000)
+				shader_model = 30;
+			else if (_renderer_id < 0xa100)
+				shader_model = 40;
+			else if (_renderer_id < 0xb000)
+				shader_model = 41;
+			else
+				shader_model = 50;
+
+			if (!parser.parse(source_code, _renderer_id & 0x10000 ? reshadefx::codegen::backend::glsl : reshadefx::codegen::backend::hlsl, shader_model, true, _performance_mode, module))
+			{
+				LOG(ERROR) << "Failed to compile " << path << ":\n" << parser.errors();
+				_last_reload_successful = false;
+				return;
+			}
+
+			errors += parser.errors();
+		}
+
+#if RESHADE_DUMP_NATIVE_SHADERS
+		std::ofstream("ReShade-ShaderDump-" + path.filename_without_extension().string() + ".hlsl", std::ios::trunc) << module.hlsl;
+#endif
+
+		if (_performance_mode && _current_preset >= 0)
+		{
+			ini_file preset(_preset_files[_current_preset]);
+
+			for (auto &constant : module.spec_constants)
+			{
+				switch (constant.type.base)
+				{
+				case reshadefx::type::t_int:
+					preset.get(path.filename().string(), constant.name, constant.initializer_value.as_int);
+					break;
+				case reshadefx::type::t_uint:
+					preset.get(path.filename().string(), constant.name, constant.initializer_value.as_uint);
+					break;
+				case reshadefx::type::t_float:
+					preset.get(path.filename().string(), constant.name, constant.initializer_value.as_float);
+					break;
+				}
+			}
+		}
 
 		if (!load_effect(std::move(module), errors))
 		{
@@ -616,6 +630,7 @@ namespace reshade
 			_textures.erase(_textures.begin() + _texture_count, _textures.end());
 			_uniforms.erase(_uniforms.begin() + _uniform_count, _uniforms.end());
 			_techniques.erase(_techniques.begin() + _technique_count, _techniques.end());
+			_last_reload_successful = false;
 			return;
 		}
 		else if (errors.empty())
@@ -921,18 +936,18 @@ namespace reshade
 
 			switch (variable.basetype)
 			{
-			case uniform_datatype::signed_integer:
+			case reshadefx::type::t_int:
 				get_uniform_value(variable, values_int, 16);
 				preset.get(variable.effect_filename, variable.name, values_int);
 				set_uniform_value(variable, values_int, 16);
 				break;
-			case uniform_datatype::boolean:
-			case uniform_datatype::unsigned_integer:
+			case reshadefx::type::t_bool:
+			case reshadefx::type::t_uint:
 				get_uniform_value(variable, values_uint, 16);
 				preset.get(variable.effect_filename, variable.name, values_uint);
 				set_uniform_value(variable, values_uint, 16);
 				break;
-			case uniform_datatype::floating_point:
+			case reshadefx::type::t_float:
 				get_uniform_value(variable, values_float, 16);
 				preset.get(variable.effect_filename, variable.name, values_float);
 				set_uniform_value(variable, values_float, 16);
@@ -1004,16 +1019,16 @@ namespace reshade
 
 			switch (variable.basetype)
 			{
-			case uniform_datatype::signed_integer:
+			case reshadefx::type::t_int:
 				get_uniform_value(variable, values_int, 16);
 				preset.set(variable.effect_filename, variable.name, variant(values_int, variable.rows * variable.columns));
 				break;
-			case uniform_datatype::boolean:
-			case uniform_datatype::unsigned_integer:
+			case reshadefx::type::t_bool:
+			case reshadefx::type::t_uint:
 				get_uniform_value(variable, values_uint, 16);
 				preset.set(variable.effect_filename, variable.name, variant(values_uint, variable.rows * variable.columns));
 				break;
-			case uniform_datatype::floating_point:
+			case reshadefx::type::t_float:
 				get_uniform_value(variable, values_float, 16);
 				preset.set(variable.effect_filename, variable.name, variant(values_float, variable.rows * variable.columns));
 				break;

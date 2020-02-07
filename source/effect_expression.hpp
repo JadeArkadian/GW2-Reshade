@@ -65,7 +65,7 @@ namespace reshadefx
 		static type merge(const type &lhs, const type &rhs);
 
 		/// <summary>
-		/// Calculate the ranking between two types which can be used to select the best matching function overload. The higher the rank, the better the match.
+		/// Calculate the ranking between two types which can be used to select the best matching function overload. The higher the rank, the better the match. A value of zero indicates that the types are not compatible.
 		/// </summary>
 		static unsigned int rank(const type &src, const type &dst);
 
@@ -193,7 +193,6 @@ namespace reshadefx
 	{
 		std::string name;
 		type type;
-		uint32_t member_index = 0;
 		uint32_t size = 0;
 		uint32_t offset = 0;
 		std::unordered_map<std::string, std::pair<struct type, constant>> annotations;

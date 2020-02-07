@@ -109,9 +109,7 @@ void reshadefx::expression::reset_to_rvalue_constant(const struct location &loc,
 void reshadefx::expression::add_cast_operation(const reshadefx::type &to_type)
 {
 	if (type == to_type)
-	{
 		return; // There is nothing to do if the expression is already of the target type
-	}
 
 	if (to_type.is_scalar() && !type.is_scalar())
 	{
@@ -148,6 +146,8 @@ void reshadefx::expression::add_cast_operation(const reshadefx::type &to_type)
 	}
 	else
 	{
+		assert(!type.is_array() && !to_type.is_array());
+
 		ops.push_back({ operation::op_cast, type, to_type });
 	}
 
@@ -219,7 +219,7 @@ void reshadefx::expression::add_dynamic_index_access(reshadefx::codegen *codegen
 	// To handle a dynamic index into a constant means we need to create a local variable first or else any of the indexing instructions do not work
 	if (is_constant)
 	{
-		base = codegen->define_variable(location, prev_type, nullptr, false, codegen->emit_constant(prev_type, constant));
+		base = codegen->define_variable(location, prev_type, std::string(), false, codegen->emit_constant(prev_type, constant));
 
 		// We converted the constant to a l-value reference to a new variable
 		is_lvalue = true;

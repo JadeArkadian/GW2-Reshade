@@ -18,29 +18,26 @@ struct on_scope_exit
 
 // -- Parsing -- //
 
-reshadefx::parser::parser(codegen::backend backend, unsigned int shader_model, bool debug_info)
+bool reshadefx::parser::parse(const std::string &input, codegen::backend backend, unsigned int shader_model, bool debug_info, bool uniforms_to_spec_constants, module &result)
 {
 	switch (backend)
 	{
 	case codegen::backend::glsl:
-		extern reshadefx::codegen *create_codegen_glsl(bool);
-		_codegen.reset(create_codegen_glsl(debug_info));
+		extern reshadefx::codegen *create_codegen_glsl(bool, bool);
+		_codegen.reset(create_codegen_glsl(debug_info, uniforms_to_spec_constants));
 		break;
 	case codegen::backend::hlsl:
-		extern reshadefx::codegen *create_codegen_hlsl(unsigned int, bool);
-		_codegen.reset(create_codegen_hlsl(shader_model, debug_info));
+		extern reshadefx::codegen *create_codegen_hlsl(unsigned int, bool, bool);
+		_codegen.reset(create_codegen_hlsl(shader_model, debug_info, uniforms_to_spec_constants));
 		break;
 	case codegen::backend::spirv:
-		extern reshadefx::codegen *create_codegen_spirv(bool);
-		_codegen.reset(create_codegen_spirv(debug_info));
+		extern reshadefx::codegen *create_codegen_spirv(bool, bool);
+		_codegen.reset(create_codegen_spirv(debug_info, uniforms_to_spec_constants));
 		break;
 	default:
 		assert(false);
 	}
-}
 
-bool reshadefx::parser::parse(const std::string &input)
-{
 	_lexer.reset(new lexer(input));
 	_lexer_backup.reset();
 
@@ -50,6 +47,8 @@ bool reshadefx::parser::parse(const std::string &input)
 	while (!peek(tokenid::end_of_file))
 		if (!parse_top())
 			success = false;
+
+	_codegen->write_result(result);
 
 	return success;
 }
@@ -99,7 +98,7 @@ bool reshadefx::parser::peek(tokenid tokid) const
 }
 void reshadefx::parser::consume()
 {
-	_token = _token_next;
+	_token = std::move(_token_next);
 	_token_next = _lexer->lex();
 }
 void reshadefx::parser::consume_until(tokenid tokid)
@@ -358,6 +357,7 @@ bool reshadefx::parser::parse_type(type &type)
 
 	return true;
 }
+
 bool reshadefx::parser::parse_array_size(type &type)
 {
 	// Reset array length to zero before checking if one exists
@@ -495,6 +495,7 @@ bool reshadefx::parser::parse_expression(expression &exp)
 
 	return true;
 }
+
 bool reshadefx::parser::parse_expression_unary(expression &exp)
 {
 	auto location = _token_next.location;
@@ -570,14 +571,15 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 					return false;
 
 				// Check if the types already match, in which case there is nothing to do
-				if (exp.type.base == cast_type.base && (exp.type.rows == cast_type.rows && exp.type.cols == cast_type.cols) && !(exp.type.is_array() || cast_type.is_array()))
+				if (exp.type.base == cast_type.base &&
+					exp.type.rows == cast_type.rows &&
+					exp.type.cols == cast_type.cols &&
+					exp.type.array_length == cast_type.array_length)
 					return true;
 
 				// Check if a cast between the types is valid
-				if (!exp.type.is_numeric() || !cast_type.is_numeric())
-					return error(location, 3017, "cannot convert non-numeric types"), false;
-				else if (exp.type.components() < cast_type.components() && !exp.type.is_scalar())
-					return error(location, 3017, "cannot convert these vector types"), false;
+				if (!type::rank(exp.type, cast_type))
+					return error(location, 3017, "cannot convert these types"), false;
 
 				exp.add_cast_operation(cast_type);
 				return true;
@@ -808,7 +810,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		{
 			if (!expect(tokenid::identifier))
 				return false;
-			identifier += "::" + _token.literal_as_string;
+			identifier += "::" + std::move(_token.literal_as_string);
 		}
 
 		// Figure out which scope to start searching in
@@ -874,7 +876,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 				if (symbol.op == symbol_type::function || param_type.has(type::q_out))
 				{
 					// All user-defined functions actually accept pointers as arguments, same applies to intrinsics with 'out' parameters
-					const auto temp_variable = _codegen->define_variable(arguments[i].location, param_type, nullptr, false);
+					const auto temp_variable = _codegen->define_variable(arguments[i].location, param_type);
 					parameters[i].reset_to_lvalue(arguments[i].location, temp_variable, param_type);
 				}
 				else
@@ -904,13 +906,6 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 		{
 			// Show error if no symbol matching the identifier was found
 			return error(location, 3004, "undeclared identifier '" + identifier + '\''), false;
-		}
-		else if (symbol.op == symbol_type::uniform)
-		{
-			assert(symbol.id != 0);
-			// Uniform variables need to be dereferenced
-			exp.reset_to_lvalue(location, symbol.id, { type::t_struct, 0, 0, 0, 0, symbol.id });
-			exp.add_member_access(symbol.uniform_index, symbol.type);
 		}
 		else if (symbol.op == symbol_type::variable)
 		{
@@ -1146,6 +1141,7 @@ bool reshadefx::parser::parse_expression_unary(expression &exp)
 
 	return true;
 }
+
 bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int left_precedence)
 {
 	// Parse left hand side of the expression
@@ -1380,6 +1376,7 @@ bool reshadefx::parser::parse_expression_multary(expression &lhs, unsigned int l
 
 	return true;
 }
+
 bool reshadefx::parser::parse_expression_assignment(expression &lhs)
 {
 	// Parse left hand side of the expression
@@ -1400,8 +1397,9 @@ bool reshadefx::parser::parse_expression_assignment(expression &lhs)
 		// Check if the assignment is valid
 		if (lhs.type.has(type::q_const) || lhs.type.has(type::q_uniform) || !lhs.is_lvalue)
 			return error(lhs.location, 3025, "l-value specifies const object"), false;
-		if (lhs.type.array_length != rhs.type.array_length || !type::rank(lhs.type, rhs.type))
+		if (!type::rank(lhs.type, rhs.type))
 			return error(rhs.location, 3020, "cannot convert these types"), false;
+
 		// Cannot perform bitwise operations on non-integral types
 		if (!lhs.type.is_integral() && (op == tokenid::ampersand_equal || op == tokenid::pipe_equal || op == tokenid::caret_equal))
 			return error(lhs.location, 3082, "int or unsigned int type required"), false;
@@ -1453,7 +1451,7 @@ bool reshadefx::parser::parse_annotations(std::unordered_map<std::string, std::p
 		const auto name = std::move(_token.literal_as_string);
 
 		if (expression expression; !expect('=') || !parse_expression_unary(expression) || !expect(';'))
-			return false; // Probably a syntax error, so abort parsing
+			return consume_until('>'), false; // Probably a syntax error, so abort parsing
 		else if (expression.is_constant)
 			annotations[name] = { expression.type, expression.constant };
 		else // Continue parsing annotations despite this not being a constant, since the syntax is still correct
@@ -2015,6 +2013,7 @@ bool reshadefx::parser::parse_statement(bool scoped)
 
 	return false;
 }
+
 bool reshadefx::parser::parse_statement_block(bool scoped)
 {
 	if (!expect('{'))
@@ -2147,7 +2146,7 @@ bool reshadefx::parser::parse_struct()
 	struct_info info;
 	// The structure name is optional
 	if (accept(tokenid::identifier))
-		info.name = _token.literal_as_string;
+		info.name = std::move(_token.literal_as_string);
 	else
 		info.name = "_anonymous_struct_" + std::to_string(location.line) + '_' + std::to_string(location.column);
 
@@ -2159,33 +2158,35 @@ bool reshadefx::parser::parse_struct()
 
 	while (!peek('}')) // Empty structures are possible
 	{
-		// Parse structure members
-		type member_type;
-		if (!parse_type(member_type))
+		struct_member_info member;
+
+		if (!parse_type(member.type))
 			return error(_token_next.location, 3000, "syntax error: unexpected '" + token::id_to_name(_token_next.id) + "', expected struct member type"), consume_until('}'), false;
 
-		if (member_type.is_void())
+		if (member.type.is_void())
 			return error(_token_next.location, 3038, "struct members cannot be void"), consume_until('}'), false;
-		if (member_type.has(type::q_in) || member_type.has(type::q_out))
+		if (member.type.has(type::q_in) || member.type.has(type::q_out))
 			return error(_token_next.location, 3055, "struct members cannot be declared 'in' or 'out'"), consume_until('}'), false;
 
-		if (member_type.is_struct()) // Nesting structures would make input/output argument flattening more complicated, so prevent it for now
+		if (member.type.is_struct()) // Nesting structures would make input/output argument flattening more complicated, so prevent it for now
 			return error(_token_next.location, 3090, "nested struct members are not supported"), consume_until('}'), false;
 
 		unsigned int count = 0;
 		do {
 			if (count++ > 0 && !expect(','))
 				return consume_until('}'), false;
+
 			if (!expect(tokenid::identifier))
 				return consume_until('}'), false;
 
-			struct_member_info member_info;
-			member_info.name = std::move(_token.literal_as_string);
-			member_info.type = member_type;
+			member.name = std::move(_token.literal_as_string);
+			member.location = std::move(_token.location);
 
 			// Modify member specific type, so that following members in the declaration list are not affected by this
-			if (!parse_array_size(member_info.type))
+			if (!parse_array_size(member.type))
 				return consume_until('}'), false;
+			else if (member.type.array_length < 0)
+				return error(member.location, 3072, '\'' + member.name + "': array dimensions of struct members must be explicit"), consume_until('}'), false;
 
 			// Structure members may have semantics to use them as input/output types
 			if (accept(':'))
@@ -2193,13 +2194,13 @@ bool reshadefx::parser::parse_struct()
 				if (!expect(tokenid::identifier))
 					return consume_until('}'), false;
 
-				member_info.semantic = std::move(_token.literal_as_string);
+				member.semantic = std::move(_token.literal_as_string);
 				// Make semantic upper case to simplify comparison later on
-				std::transform(member_info.semantic.begin(), member_info.semantic.end(), member_info.semantic.begin(), [](char c) { return static_cast<char>(toupper(c)); });
+				std::transform(member.semantic.begin(), member.semantic.end(), member.semantic.begin(), [](char c) { return static_cast<char>(toupper(c)); });
 			}
 
 			// Save member name and type for book keeping
-			info.member_list.push_back(std::move(member_info));
+			info.member_list.push_back(member);
 		} while (!peek(';'));
 
 		if (!expect(';'))
@@ -2274,6 +2275,8 @@ bool reshadefx::parser::parse_function(type type, std::string name)
 
 		if (!parse_array_size(param.type))
 			return false;
+		else if (param.type.array_length < 0)
+			return error(param.location, 3072, '\'' + param.name + "': array dimensions of function parameters must be explicit"), false;
 
 		// Handle parameter type semantic
 		if (accept(':'))
@@ -2592,10 +2595,6 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 	{
 		assert(global);
 
-		// Convert boolean uniform variables to integer type so that they have a defined size
-		if (type.is_boolean())
-			type.base = type::t_uint;
-
 		uniform_info uniform_info;
 		uniform_info.name = name;
 		uniform_info.type = type;
@@ -2605,11 +2604,8 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		uniform_info.initializer_value = std::move(initializer.constant);
 		uniform_info.has_initializer_value = initializer.is_constant;
 
-		symbol = { symbol_type::uniform, 0, type };
+		symbol = { symbol_type::variable, 0, type };
 		symbol.id = _codegen->define_uniform(location, uniform_info);
-		symbol.uniform_index = uniform_info.member_index;
-
-		assert(uniform_info.size != 0);
 	}
 	else // All other variables are separate entities
 	{
@@ -2623,13 +2619,13 @@ bool reshadefx::parser::parse_variable(type type, std::string name, bool global)
 		// Also, only use the variable initializer on global variables, since local variables for e.g. "for" statements need to be assigned in their respective scope and not their declaration
 		if (global && initializer.is_constant)
 		{
-			symbol.id = _codegen->define_variable(location, type, unique_name.c_str(), global, _codegen->emit_constant(initializer.type, initializer.constant));
+			symbol.id = _codegen->define_variable(location, type, std::move(unique_name), global, _codegen->emit_constant(initializer.type, initializer.constant));
 		}
 		else // Non-constant initializers are explicitly stored in the variable at the definition location instead
 		{
 			const auto initializer_value = _codegen->emit_load(initializer);
 
-			symbol.id = _codegen->define_variable(location, type, unique_name.c_str(), global);
+			symbol.id = _codegen->define_variable(location, type, std::move(unique_name), global);
 
 			if (initializer_value != 0)
 			{
@@ -2718,7 +2714,7 @@ bool reshadefx::parser::parse_technique_pass(pass_info &info)
 				if (!expect(tokenid::identifier))
 					return consume_until('}'), false;
 
-				identifier += "::" + _token.literal_as_string;
+				identifier += "::" + std::move(_token.literal_as_string);
 			}
 
 			location = std::move(_token.location);

@@ -414,6 +414,7 @@ next_token:
 		if (_ignore_whitespace || is_at_line_begin || *_cur == '\n')
 			goto next_token;
 		tok.id = tokenid::space;
+		tok.length = _cur - _input.data() - tok.offset;
 		return tok;
 	case '\n':
 		_cur++;
@@ -524,7 +525,11 @@ next_token:
 		if (_cur[1] == '/')
 		{
 			skip_to_next_line();
-			goto next_token;
+			if (_ignore_comments)
+				goto next_token;
+			tok.id = tokenid::single_line_comment;
+			tok.length = _cur - _input.data() - tok.offset;
+			return tok;
 		}
 		else if (_cur[1] == '*')
 		{
@@ -542,7 +547,11 @@ next_token:
 				}
 				skip(1);
 			}
-			goto next_token;
+			if (_ignore_comments)
+				goto next_token;
+			tok.id = tokenid::multi_line_comment;
+			tok.length = _cur - _input.data() - tok.offset;
+			return tok;
 		}
 		else if (_cur[1] == '=')
 			tok.id = tokenid::slash_equal,
@@ -702,7 +711,7 @@ bool reshadefx::lexer::parse_pp_directive(token &tok)
 	}
 	else if (tok.literal_as_string == "line") // The #line directive needs special handling
 	{
-		skip(tok.length);
+		skip(tok.length); // The 'parse_identifier' does not update the pointer to the current character, so do that now
 		skip_space();
 		parse_numeric_literal(tok);
 		skip(tok.length);
@@ -721,7 +730,7 @@ bool reshadefx::lexer::parse_pp_directive(token &tok)
 			token temptok;
 			parse_string_literal(temptok, false);
 
-			_cur_location.source = temptok.literal_as_string;
+			_cur_location.source = std::move(temptok.literal_as_string);
 		}
 
 		// Do not return the #line directive as token to the caller

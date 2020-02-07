@@ -123,7 +123,8 @@ static inline uint32_t align(uint32_t address, uint32_t alignment)
 class codegen_spirv final : public codegen
 {
 public:
-	codegen_spirv(bool debug_info) : _debug_info(debug_info)
+	codegen_spirv(bool debug_info, bool uniforms_to_spec_constants)
+		: _debug_info(debug_info), _uniforms_to_spec_constants(uniforms_to_spec_constants)
 	{
 		_glsl_ext = make_id();
 	}
@@ -171,38 +172,31 @@ private:
 	std::unordered_map<spv::Id, spv::StorageClass> _storage_lookup;
 	uint32_t _current_sampler_binding = 0;
 	uint32_t _current_semantic_location = 10;
-	std::vector<std::pair<std::string, bool>> _entry_points;
+	std::unordered_set<spv::Id> _spec_constants;
 
 	std::vector<function_blocks> _functions2;
 	std::unordered_map<id, spirv_basic_block> _block_data;
 	spirv_basic_block *_current_block_data = nullptr;
 
 	bool _debug_info = false;
+	bool _uniforms_to_spec_constants = false;
 	id _next_id = 1;
 	id _glsl_ext = 0;
 	id _last_block = 0;
 	id _current_block = 0;
-	id _global_ubo_type = 0;
+	struct_info _global_ubo_type;
 	id _global_ubo_variable = 0;
 	uint32_t _global_ubo_offset = 0;
-	size_t _current_function = std::numeric_limits<size_t>::max();
+	function_blocks *_current_function = nullptr;
 
 	void create_global_ubo()
 	{
-		if (_global_ubo_type == 0)
+		if (_global_ubo_type.definition == 0)
 			return;
 
-		struct_info global_ubo_type;
-		global_ubo_type.definition = _global_ubo_type;
-		for (const auto &uniform : _uniforms)
-			global_ubo_type.member_list.push_back({ uniform.type, uniform.name });
+		define_struct({}, _global_ubo_type);
 
-		define_struct({}, global_ubo_type);
-		add_decoration(_global_ubo_type, spv::DecorationBlock);
-		add_decoration(_global_ubo_type, spv::DecorationBinding, { 0 });
-		add_decoration(_global_ubo_type, spv::DecorationDescriptorSet, { 0 });
-
-		define_variable(_global_ubo_variable, {}, { type::t_struct, 0, 0, type::q_uniform, 0, _global_ubo_type }, "$Globals", spv::StorageClassUniform);
+		define_variable(_global_ubo_variable, {}, { type::t_struct, 0, 0, type::q_uniform, 0, _global_ubo_type.definition }, "$Globals", spv::StorageClassUniform);
 	}
 
 	inline id make_id() { return _next_id++; }
@@ -252,11 +246,7 @@ private:
 	{
 		const_cast<codegen_spirv *>(this)->create_global_ubo();
 
-		s.samplers = _samplers;
-		s.textures = _textures;
-		s.uniforms = _uniforms;
-		s.techniques = _techniques;
-		s.entry_points = _entry_points;
+		s = _module;
 
 		// Write SPIRV header info
 		write(s.spirv, spv::MagicNumber);
@@ -560,26 +550,6 @@ private:
 		_capabilities.insert(capability);
 	}
 
-	void define_variable(id id, const location &loc, const type &type, const char *name, spv::StorageClass storage, spv::Id initializer_value = 0)
-	{
-		spirv_basic_block &block = storage != spv::StorageClassFunction ? _variables : _functions2[_current_function].variables;
-
-		add_location(loc, block);
-
-		// https://www.khronos.org/registry/spir-v/specs/unified1/SPIRV.html#OpVariable
-		spirv_instruction &instruction = add_instruction_without_result(spv::OpVariable, block);
-		instruction.type = convert_type(type, true, storage);
-		instruction.result = id;
-		instruction.add(storage);
-		if (initializer_value != 0)
-			instruction.add(initializer_value);
-
-		if (name != nullptr && *name != '\0')
-			add_name(id, name);
-
-		_storage_lookup[id] = storage;
-	}
-
 	id   define_struct(const location &loc, struct_info &info) override
 	{
 		// First define all member types to make sure they are declared before the struct type references them
@@ -595,7 +565,8 @@ private:
 		for (spv::Id type_id : member_types)
 			instruction.add(type_id);
 
-		if (info.definition == _global_ubo_type)
+		// Special handling for when this is called from 'create_global_ubo'
+		if (info.definition == _global_ubo_type.definition)
 			instruction.result = info.definition;
 		else
 			assert(info.definition == 0), info.definition = instruction.result;
@@ -614,7 +585,7 @@ private:
 	{
 		info.id = make_id();
 
-		_textures.push_back(info);
+		_module.textures.push_back(info);
 
 		return info.id;
 	}
@@ -629,51 +600,100 @@ private:
 		add_decoration(info.id, spv::DecorationBinding, { info.binding });
 		add_decoration(info.id, spv::DecorationDescriptorSet, { info.set });
 
-		_samplers.push_back(info);
+		_module.samplers.push_back(info);
 
 		return info.id;
 	}
 	id   define_uniform(const location &, uniform_info &info) override
 	{
-		if (_global_ubo_type == 0)
-			_global_ubo_type = make_id();
-		if (_global_ubo_variable == 0)
+		if (_uniforms_to_spec_constants && info.type.is_scalar() && info.annotations.find("source") == info.annotations.end())
 		{
-			_global_ubo_variable = make_id();
-			_storage_lookup[_global_ubo_variable] = spv::StorageClassUniform;
+			const id res = emit_constant(info.type, info.initializer_value, true);
+
+			add_name(res, info.name.c_str());
+
+			_spec_constants.insert(res);
+			_module.spec_constants.push_back(info);
+
+			return res;
 		}
+		else
+		{
+			if (_global_ubo_type.definition == 0)
+			{
+				_global_ubo_type.definition = make_id();
 
-		// GLSL specification on std140 layout:
-		// 1. If the member is a scalar consuming N basic machine units, the base alignment is N.
-		// 2. If the member is a two- or four-component vector with components consuming N basic machine units, the base alignment is 2N or 4N, respectively.
-		// 3. If the member is a three-component vector with components consuming N basic machine units, the base alignment is 4N.
-		const unsigned int size = 4 * (info.type.rows == 3 ? 4 : info.type.rows) * info.type.cols * std::max(1, info.type.array_length);
-		const unsigned int alignment = size;
-		info.size = size;
-		info.offset = align(_global_ubo_offset, alignment);
-		_global_ubo_offset = info.offset + size;
+				add_decoration(_global_ubo_type.definition, spv::DecorationBlock);
+				add_decoration(_global_ubo_type.definition, spv::DecorationBinding, { 0 });
+				add_decoration(_global_ubo_type.definition, spv::DecorationDescriptorSet, { 0 });
+			}
+			if (_global_ubo_variable == 0)
+			{
+				_global_ubo_variable = make_id();
+			}
 
-		info.member_index = static_cast<uint32_t>(_uniforms.size());
+			// GLSL specification on std140 layout:
+			// 1. If the member is a scalar consuming N basic machine units, the base alignment is N.
+			// 2. If the member is a two- or four-component vector with components consuming N basic machine units, the base alignment is 2N or 4N, respectively.
+			// 3. If the member is a three-component vector with components consuming N basic machine units, the base alignment is 4N.
+			const unsigned int size = 4 * (info.type.rows == 3 ? 4 : info.type.rows) * info.type.cols * std::max(1, info.type.array_length);
+			const unsigned int alignment = size;
 
-		add_member_decoration(_global_ubo_type, info.member_index, spv::DecorationOffset, { info.offset });
+			info.size = size;
+			info.offset = align(_global_ubo_offset, alignment);
+			_global_ubo_offset = info.offset + size;
 
-		_uniforms.push_back(info);
+			_module.uniforms.push_back(info);
 
-		return _global_ubo_variable;
+			auto &member_list = _global_ubo_type.member_list;
+			member_list.push_back({ info.type, info.name });
+
+			// Convert boolean uniform variables to integer type so that they have a defined size
+			if (info.type.is_boolean())
+				member_list.back().type.base = type::t_uint;
+
+			const uint32_t member_index = static_cast<uint32_t>(member_list.size() - 1);
+
+			add_member_decoration(_global_ubo_type.definition, member_index, spv::DecorationOffset, { info.offset });
+
+			return 0xF0000000 | member_index;
+		}
 	}
-	id   define_variable(const location &loc, const type &type, const char *name, bool global, id initializer_value) override
+	id   define_variable(const location &loc, const type &type, std::string name, bool global, id initializer_value) override
 	{
-		id id = make_id();
-		define_variable(id, loc, type, name, global ? spv::StorageClassPrivate : spv::StorageClassFunction, initializer_value);
+		const id res = make_id();
 
-		return id;
+		define_variable(res, loc, type, name.c_str(), global ? spv::StorageClassPrivate : spv::StorageClassFunction, initializer_value);
+
+		return res;
+	}
+	void define_variable(id id, const location &loc, const type &type, const char *name, spv::StorageClass storage, spv::Id initializer_value = 0)
+	{
+		spirv_basic_block &block = storage != spv::StorageClassFunction ? _variables : _current_function->variables;
+
+		add_location(loc, block);
+
+		// https://www.khronos.org/registry/spir-v/specs/unified1/SPIRV.html#OpVariable
+		spirv_instruction &instruction = add_instruction_without_result(spv::OpVariable, block);
+		instruction.type = convert_type(type, true, storage);
+		instruction.result = id;
+		instruction.add(storage);
+		if (initializer_value != 0)
+			instruction.add(initializer_value);
+
+		if (name != nullptr && *name != '\0')
+			add_name(id, name);
+
+		_storage_lookup[id] = storage;
 	}
 	id   define_function(const location &loc, function_info &info) override
 	{
-		_current_function = _functions2.size();
+		assert(!is_in_function());
 
 		auto &function = _functions2.emplace_back();
 		function.return_type = info.return_type;
+
+		_current_function = &function;
 
 		for (auto &param : info.parameter_list)
 			function.param_types.push_back(param.type);
@@ -710,9 +730,11 @@ private:
 
 	void create_entry_point(const function_info &func, bool is_ps) override
 	{
-		if (const auto it = std::find_if(_entry_points.begin(), _entry_points.end(),
-			[&func](const auto &ep) { return ep.first == func.unique_name; }); it != _entry_points.end())
+		if (const auto it = std::find_if(_module.entry_points.begin(), _module.entry_points.end(),
+			[&func](const auto &ep) { return ep.first == func.unique_name; }); it != _module.entry_points.end())
 			return;
+
+		_module.entry_points.push_back({ func.unique_name, is_ps });
 
 		std::vector<expression> call_params;
 		std::vector<unsigned int> inputs_and_outputs;
@@ -971,35 +993,53 @@ private:
 			.add(entry_point.definition)
 			.add_string(func.unique_name.c_str())
 			.add(inputs_and_outputs.begin(), inputs_and_outputs.end());
-
-		_entry_points.push_back({ func.unique_name, is_ps });
 	}
 
 	id   emit_load(const expression &chain) override
 	{
-		add_location(chain.location, *_current_block_data);
-
 		if (chain.is_constant) // Constant expressions do not have a complex access chain
 			return emit_constant(chain.type, chain.constant);
 
 		spv::Id result = chain.base;
 
 		size_t op_index2 = 0;
+		auto base_type = chain.type;
+		bool is_uniform_bool = false;
+
+		if (chain.is_lvalue || !chain.ops.empty())
+			add_location(chain.location, *_current_block_data);
 
 		// If a variable is referenced, load the value first
-		if (chain.is_lvalue)
+		if (chain.is_lvalue && _spec_constants.find(chain.base) == _spec_constants.end())
 		{
-			auto base_type = chain.type;
 			if (!chain.ops.empty())
 				base_type = chain.ops[0].from;
+
+			spv::StorageClass storage = spv::StorageClassFunction;
+			if (const auto it = _storage_lookup.find(chain.base); it != _storage_lookup.end())
+				storage = it->second;
+
+			// Check if this is a uniform variable (see 'define_uniform' function above) and dereference it
+			if (result & 0xF0000000)
+			{
+				const uint32_t member_index = result ^ 0xF0000000;
+
+				is_uniform_bool = base_type.is_boolean();
+
+				if (is_uniform_bool)
+					base_type.base = type::t_uint;
+
+				result = add_instruction(spv::OpAccessChain, convert_type(base_type, true, spv::StorageClassUniform))
+					.add(_global_ubo_variable)
+					.add(emit_constant(member_index))
+					.result;
+
+				storage = spv::StorageClassUniform;
+			}
 
 			// Any indexing expressions can be resolved during load with an 'OpAccessChain' already
 			if (!chain.ops.empty() && (chain.ops[0].type == expression::operation::op_index || chain.ops[0].type == expression::operation::op_member))
 			{
-				spv::StorageClass storage = spv::StorageClassFunction;
-				if (const auto it = _storage_lookup.find(chain.base); it != _storage_lookup.end())
-					storage = it->second;
-
 				spirv_instruction &node = add_instruction(spv::OpAccessChain)
 					.add(result); // Base
 
@@ -1021,6 +1061,16 @@ private:
 			result = add_instruction(spv::OpLoad, convert_type(base_type))
 				.add(result) // Pointer
 				.result; // Result ID
+		}
+
+		if (is_uniform_bool)
+		{
+			base_type.base = type::t_bool;
+
+			result = add_instruction(spv::OpINotEqual, convert_type(base_type))
+				.add(result)
+				.add(emit_constant(0))
+				.result;
 		}
 
 		// Work through all remaining operations in the access chain and apply them to the value
@@ -1324,19 +1374,24 @@ private:
 	{
 		constant data;
 		data.as_uint[0] = value;
-		return emit_constant({ type::t_uint, 1, 1 }, data);
+		return emit_constant({ type::t_uint, 1, 1 }, data, false);
 	}
 	id   emit_constant(const type &type, const constant &data) override
 	{
-		if (auto it = std::find_if(_constant_lookup.begin(), _constant_lookup.end(), [&type, &data](auto &x) {
-			if (!(std::get<0>(x) == type && std::memcmp(&std::get<1>(x).as_uint[0], &data.as_uint[0], sizeof(uint32_t) * 16) == 0 && std::get<1>(x).array_data.size() == data.array_data.size()))
-				return false;
-			for (size_t i = 0; i < data.array_data.size(); ++i)
-				if (std::memcmp(&std::get<1>(x).array_data[i].as_uint[0], &data.array_data[i].as_uint[0], sizeof(uint32_t) * 16) != 0)
+		return emit_constant(type, data, false);
+	}
+	id   emit_constant(const type &type, const constant &data, bool spec_constant)
+	{
+		if (!spec_constant)
+			if (auto it = std::find_if(_constant_lookup.begin(), _constant_lookup.end(), [&type, &data](auto &x) {
+				if (!(std::get<0>(x) == type && std::memcmp(&std::get<1>(x).as_uint[0], &data.as_uint[0], sizeof(uint32_t) * 16) == 0 && std::get<1>(x).array_data.size() == data.array_data.size()))
 					return false;
-			return true;
-		}); it != _constant_lookup.end())
-			return std::get<2>(*it);
+				for (size_t i = 0; i < data.array_data.size(); ++i)
+					if (std::memcmp(&std::get<1>(x).array_data[i].as_uint[0], &data.array_data[i].as_uint[0], sizeof(uint32_t) * 16) != 0)
+						return false;
+				return true;
+			}); it != _constant_lookup.end())
+				return std::get<2>(*it);
 
 		spv::Id result = 0;
 
@@ -1355,7 +1410,9 @@ private:
 			for (size_t i = elements.size(); i < static_cast<size_t>(type.array_length); ++i)
 				elements.push_back(emit_constant(elem_type, {}));
 
-			spirv_instruction &node = add_instruction(spv::OpConstantComposite, convert_type(type), _types_and_constants);
+			spirv_instruction &node = add_instruction(
+				spec_constant ? spv::OpSpecConstantComposite : spv::OpConstantComposite,
+				convert_type(type), _types_and_constants);
 
 			for (spv::Id elem : elements)
 				node.add(elem);
@@ -1364,6 +1421,8 @@ private:
 		}
 		else if (type.is_struct())
 		{
+			assert(!spec_constant);
+
 			result = add_instruction(spv::OpConstantNull, convert_type(type), _types_and_constants).result;
 		}
 		else if (type.is_matrix())
@@ -1388,7 +1447,9 @@ private:
 			}
 			else
 			{
-				spirv_instruction &node = add_instruction(spv::OpConstantComposite, convert_type(type), _types_and_constants);
+				spirv_instruction &node = add_instruction(
+					spec_constant ? spv::OpSpecConstantComposite : spv::OpConstantComposite,
+					convert_type(type), _types_and_constants);
 
 				for (unsigned int i = 0; i < type.rows; ++i)
 					node.add(rows[i]);
@@ -1410,7 +1471,9 @@ private:
 				rows[i] = emit_constant(scalar_type, scalar_data);
 			}
 
-			spirv_instruction &node = add_instruction(spv::OpConstantComposite, convert_type(type), _types_and_constants);
+			spirv_instruction &node = add_instruction(
+				spec_constant ? spv::OpSpecConstantComposite : spv::OpConstantComposite,
+				convert_type(type), _types_and_constants);
 
 			for (unsigned int i = 0; i < type.rows; ++i)
 				node.add(rows[i]);
@@ -1419,15 +1482,21 @@ private:
 		}
 		else if (type.is_boolean())
 		{
-			result = add_instruction(data.as_uint[0] ? spv::OpConstantTrue : spv::OpConstantFalse, convert_type(type), _types_and_constants).result;
+			result = add_instruction(data.as_uint[0] ?
+				(spec_constant ? spv::OpSpecConstantTrue : spv::OpConstantTrue) :
+				(spec_constant ? spv::OpSpecConstantFalse : spv::OpConstantFalse),
+				convert_type(type), _types_and_constants).result;
 		}
 		else
 		{
 			assert(type.is_scalar());
-			result = add_instruction(spv::OpConstant, convert_type(type), _types_and_constants).add(data.as_uint[0]).result;
+			result = add_instruction(
+				spec_constant ? spv::OpSpecConstant : spv::OpConstant,
+				convert_type(type), _types_and_constants).add(data.as_uint[0]).result;
 		}
 
-		_constant_lookup.push_back({ type, data, result });
+		if (!spec_constant)
+			_constant_lookup.push_back({ type, data, result });
 
 		return result;
 	}
@@ -1775,7 +1844,7 @@ private:
 	}
 
 	bool is_in_block() const override { return _current_block != 0; }
-	bool is_in_function() const override { return _current_function != std::numeric_limits<size_t>::max(); }
+	bool is_in_function() const override { return _current_function != nullptr; }
 
 	id   set_block(id id) override
 	{
@@ -1814,14 +1883,14 @@ private:
 		if (!is_in_block()) // Might already have left the last block in which case this has to be ignored
 			return 0;
 
-		if (_functions2[_current_function].return_type.is_void())
+		if (_current_function->return_type.is_void())
 		{
 			add_instruction_without_result(spv::OpReturn);
 		}
 		else
 		{
 			if (value == 0) // The implicit return statement needs this
-				value = add_instruction(spv::OpUndef, convert_type(_functions2[_current_function].return_type), _types_and_constants).result;
+				value = add_instruction(spv::OpUndef, convert_type(_current_function->return_type), _types_and_constants).result;
 
 			add_instruction_without_result(spv::OpReturnValue)
 				.add(value);
@@ -1875,17 +1944,16 @@ private:
 	{
 		assert(is_in_function()); // Can only leave if there was a function to begin with
 
-		auto &function = _functions2[_current_function];
-		function.definition = _block_data[_last_block];
+		_current_function->definition = _block_data[_last_block];
 
 		// Append function end instruction
-		add_instruction_without_result(spv::OpFunctionEnd, function.definition);
+		add_instruction_without_result(spv::OpFunctionEnd, _current_function->definition);
 
-		_current_function = std::numeric_limits<size_t>::max();
+		_current_function = nullptr;
 	}
 };
 
-codegen *create_codegen_spirv(bool debug_info)
+codegen *create_codegen_spirv(bool debug_info, bool uniforms_to_spec_constants)
 {
-	return new codegen_spirv(debug_info);
+	return new codegen_spirv(debug_info, uniforms_to_spec_constants);
 }

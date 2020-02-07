@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <string>
 #include <vector>
 #include <algorithm>
 
@@ -16,7 +17,7 @@ namespace reshadefx
 		std::vector<uint32_t> spirv;
 		std::vector<struct texture_info> textures;
 		std::vector<struct sampler_info> samplers;
-		std::vector<struct uniform_info> uniforms;
+		std::vector<struct uniform_info> uniforms, spec_constants;
 		std::vector<struct technique_info> techniques;
 		std::vector<std::pair<std::string, bool>> entry_points;
 	};
@@ -81,7 +82,7 @@ namespace reshadefx
 		/// <param name="loc">Source location matching this definition (for debugging).</param>
 		/// <param name="info">The variable description.</param>
 		/// <returns>New SSA ID of the variable.</returns>
-		virtual id  define_variable(const struct location &loc, const struct type &type, const char *name, bool global, id initializer_value = 0) = 0;
+		virtual id  define_variable(const struct location &loc, const struct type &type, std::string name = std::string(), bool global = false, id initializer_value = 0) = 0;
 		/// <summary>
 		/// Define a new function and its function parameters and make it current. Any code added after this call is added to this function.
 		/// </summary>
@@ -96,7 +97,7 @@ namespace reshadefx
 		/// <param name="info">The technique description.</param>
 		inline void define_technique(struct technique_info &info)
 		{
-			_techniques.push_back(info);
+			_module.techniques.push_back(info);
 		}
 
 		/// <summary>
@@ -297,7 +298,7 @@ namespace reshadefx
 		/// <returns>A reference to the texture description.</returns>
 		inline struct texture_info &find_texture(id id)
 		{
-			return *std::find_if(_textures.begin(), _textures.end(),[id](const auto &it) { return it.id == id; });
+			return *std::find_if(_module.textures.begin(), _module.textures.end(),[id](const auto &it) { return it.id == id; });
 		}
 		/// <summary>
 		/// Look up an existing function definition.
@@ -310,11 +311,8 @@ namespace reshadefx
 		}
 
 	protected:
+		module _module;
 		std::vector<struct struct_info> _structs;
-		std::vector<struct texture_info> _textures;
-		std::vector<struct sampler_info> _samplers;
-		std::vector<struct uniform_info> _uniforms;
 		std::vector<std::unique_ptr<struct function_info>> _functions;
-		std::vector<struct technique_info> _techniques;
 	};
 }
